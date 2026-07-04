@@ -1,6 +1,9 @@
 COMPOSE = docker compose -f deploy/docker-compose.yml
 
-.PHONY: up down clean migrate migrate-down psql nats-check verify test test-integration crawl-wacheng
+# 非 mock 服務（正式/遠端用）：排除 mockgoogle / scheduler / worker（僅供 mock 排程爬取）
+PROD_SERVICES = postgres nats migrate ingestion webhook routing replier analyzer api web adminer
+
+.PHONY: up up-prod down clean migrate migrate-down psql nats-check verify test test-integration crawl-wacheng
 
 test:          ## 單元測試（Docker 內跑，不需本機 Go）
 	docker run --rm -v $(PWD)/crawler:/src -v wachen-gomod:/go/pkg/mod -w /src \
@@ -21,8 +24,11 @@ test-integration: ## store 整合測試（需先 make up，連 compose 網路打
 		-e TEST_DATABASE_URL="postgres://wachen:$${POSTGRES_PASSWORD:-wachen_dev}@postgres:5432/wachen?sslmode=disable" \
 		golang:1.22-alpine sh -c "go mod tidy && go test -v -run Integration ./internal/store/"
 
-up:            ## 啟動全部服務（含自動跑 migrations）
+up:            ## 啟動全部服務（含 mock，開發用）
 	$(COMPOSE) up -d
+
+up-prod:       ## 只啟非 mock 服務（正式/遠端；migrate 會自動跑，資料已還原則 no-op）
+	$(COMPOSE) up -d $(PROD_SERVICES)
 
 down:          ## 停止服務（保留資料）
 	$(COMPOSE) down
