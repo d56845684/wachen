@@ -3,6 +3,7 @@ services:
     restart: unless-stopped
     image: postgres:16-alpine
     container_name: wachen-postgres
+    mem_limit: 512m
     environment:
       POSTGRES_USER: wachen
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-wachen_dev}
@@ -33,6 +34,7 @@ services:
     restart: unless-stopped
     image: nats:2.10-alpine
     container_name: wachen-nats
+    mem_limit: 256m
     command: ["--jetstream", "--store_dir", "/data", "--http_port", "8222"]
     # 4222/8222 僅內部使用；監控用 make nats-check（容器內 wget）
     volumes:
@@ -43,6 +45,7 @@ services:
     build: ../crawler
     image: wachen-crawler
     container_name: wachen-mockgoogle
+    mem_limit: 128m
     command: ["/bin/mockgoogle"]
     environment:
       PORT: "8081"
@@ -54,6 +57,7 @@ services:
     restart: unless-stopped
     image: wachen-crawler
     container_name: wachen-scheduler
+    mem_limit: 128m
     command: ["/bin/scheduler"]
     environment:
       DATABASE_URL: postgres://app_user:app_dev_password@postgres:5432/wachen?sslmode=disable
@@ -70,6 +74,7 @@ services:
     restart: unless-stopped
     image: wachen-crawler
     command: ["/bin/worker"]
+    mem_limit: 128m
     environment:
       DATABASE_URL: postgres://app_user:app_dev_password@postgres:5432/wachen?sslmode=disable
       NATS_URL: nats://nats:4222
@@ -85,6 +90,7 @@ services:
     restart: unless-stopped
     image: wachen-crawler
     container_name: wachen-ingestion
+    mem_limit: 128m
     command: ["/bin/ingestion"]
     environment:
       DATABASE_URL: postgres://app_user:app_dev_password@postgres:5432/wachen?sslmode=disable
@@ -99,6 +105,7 @@ services:
     restart: unless-stopped
     image: wachen-crawler
     container_name: wachen-webhook
+    mem_limit: 128m
     command: ["/bin/webhook"]
     environment:
       DATABASE_URL: postgres://app_user:app_dev_password@postgres:5432/wachen?sslmode=disable
@@ -115,6 +122,7 @@ services:
     restart: unless-stopped
     image: wachen-crawler
     container_name: wachen-routing
+    mem_limit: 128m
     command: ["/bin/routing"]
     environment:
       DATABASE_URL: postgres://app_user:app_dev_password@postgres:5432/wachen?sslmode=disable
@@ -131,6 +139,7 @@ services:
     build: ../analyzer
     image: wachen-analyzer
     container_name: wachen-analyzer
+    mem_limit: 256m
     environment:
       DATABASE_URL: postgres://app_user:app_dev_password@postgres:5432/wachen
       NATS_URL: nats://nats:4222
@@ -147,6 +156,7 @@ services:
     restart: unless-stopped
     image: wachen-crawler
     container_name: wachen-replier
+    mem_limit: 128m
     command: ["/bin/replier"]
     environment:
       DATABASE_URL: postgres://app_user:app_dev_password@postgres:5432/wachen?sslmode=disable
@@ -161,6 +171,7 @@ services:
     restart: unless-stopped
     image: wachen-crawler
     container_name: wachen-api
+    mem_limit: 128m
     command: ["/bin/api"]
     environment:
       DATABASE_URL: postgres://app_user:app_dev_password@postgres:5432/wachen?sslmode=disable
@@ -181,6 +192,7 @@ services:
     build: ../admin
     image: wachen-admin
     container_name: wachen-web
+    mem_limit: 64m
     ports:
       - "8088:80"   # 後台唯一對外入口（nginx：靜態 SPA + /api 代理）
     depends_on:
@@ -191,6 +203,7 @@ services:
     restart: unless-stopped
     image: adminer:4
     container_name: wachen-adminer
+    mem_limit: 128m
     ports:
       - "8080:8080"
     environment:
