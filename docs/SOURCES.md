@@ -1,6 +1,6 @@
 # 評論資料來源支援現況
 
-> 整理自 `crawler/internal/adapter/`、`migrations/`、`docs/ARCHITECTURE.md` §2.2／§6.2（2026-07-04）。
+> 整理自 `backend/internal/adapter/`、`migrations/`、`docs/ARCHITECTURE.md` §2.2／§6.2（2026-07-04）。
 
 ## 總覽
 
@@ -18,7 +18,7 @@
 
 ### 1. `google_review` — Google Business Profile 評論
 
-- 程式：`crawler/internal/adapter/google/google.go`
+- 程式：`backend/internal/adapter/google/google.go`
 - API：Google My Business API v4（`mybusiness.googleapis.com`），評論端點目前仍在 v4
 - 抓取粒度：source × location，一家門市一個可平行的小任務
 - 增量抓取：cursor 記 `last_update_time`，只抓有更新的評論；單次任務分頁上限 20 頁（命中回報 `PageCapHit`，不靜默截斷）
@@ -36,7 +36,7 @@
 
 ### 2. `webhook_generic` — 官網 / APP 留言、客服管道（推送型）
 
-- 程式：`crawler/cmd/webhook/main.go`（Webhook Gateway）
+- 程式：`backend/cmd/webhook/main.go`（Webhook Gateway）
 - 端點：`POST /v1/sources/{source_name}/reviews`，驗 `X-Webhook-Secret`（比對 `sources.config.webhook_secret`）
 - Body：`external_id`（冪等鍵，必填）、`author`、`rating`、`content`、`posted_at`、`source_url`（必填）、`location_id`（選填）
 - 回覆能力：目前 `can_reply: false`；架構上預留 config 設 callback endpoint 反向回覆自家系統
@@ -76,4 +76,4 @@
 
 ## Mock 環境（測試用）
 
-`crawler/cmd/mockgoogle/` 模擬 GBP v4 評論 API：啟動預埋每 location 8 則歷史評論，之後每 `MOCK_INTERVAL`（預設 20s）產生一則新評論（偏負評、含反諷樣本）或編輯既有評論（約 1/3 機率，驗證版本化抓取）。欄位集合以真 API 為上限。把 `sources.config.api_base_url` 指到 mockgoogle 即可，google adapter 原封不動。
+`backend/cmd/mockgoogle/` 模擬 GBP v4 評論 API：啟動預埋每 location 8 則歷史評論，之後每 `MOCK_INTERVAL`（預設 20s）產生一則新評論（偏負評、含反諷樣本）或編輯既有評論（約 1/3 機率，驗證版本化抓取）。欄位集合以真 API 為上限。把 `sources.config.api_base_url` 指到 mockgoogle 即可，google adapter 原封不動。

@@ -25,5 +25,5 @@ M2/M3 用 `trap mock_teardown EXIT` 保證測完（含失敗）一定砍掉 mock
 
 ## 其他測試層（依語言慣例，不在此）
 
-- **Go 單元/整合**：與原始碼同目錄 `crawler/**/*_test.go`（`make test` / `make test-integration`）
+- **Go 單元/整合**：與原始碼同目錄 `backend/**/*_test.go`（`make test` / `make test-integration`）
 - **Python 單元**：`analyzer/tests/`（`make test-python`，uv + pytest）

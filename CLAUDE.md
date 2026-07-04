@@ -1,6 +1,6 @@
 # poc-wachen — 顧客負評追蹤系統 PoC
 
-架構文件：`docs/ARCHITECTURE.md`。Go 爬蟲+ingestion+webhook（crawler/）+ Python AI 分析（analyzer/，uv 管理）+ PostgreSQL（migrations/）+ NATS JetStream。LLM 供應商由 `GEMINI_API_KEY` 決定（未設定 → heuristic fallback）。
+架構文件：`docs/ARCHITECTURE.md`。Go 爬蟲+ingestion+webhook（backend/）+ Python AI 分析（analyzer/，uv 管理）+ PostgreSQL（migrations/）+ NATS JetStream。LLM 供應商由 `GEMINI_API_KEY` 決定（未設定 → heuristic fallback）。
 
 ## Testing
 

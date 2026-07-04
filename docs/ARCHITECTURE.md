@@ -393,7 +393,7 @@ PoC 頁面（對應 Phase 1-3 + 回覆）：
 
 ```
 poc-wachen/
-├── crawler/                  # Go：scheduler + workers + webhook gateway + reply worker
+├── backend/                  # Go：scheduler + workers + webhook gateway + reply worker
 │   ├── cmd/{scheduler,worker,webhook,replier}/
 │   └── internal/adapter/     # google/, facebook/, webhook/, nps/（Fetch + Reply 同居一處，共用憑證）
 ├── backend/                  # Go：ingestion + routing + API + notifier

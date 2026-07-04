@@ -42,8 +42,8 @@ services:
 
   mockgoogle:
     restart: unless-stopped
-    build: ../crawler
-    image: wachen-crawler
+    build: ../backend
+    image: wachen-backend
     container_name: wachen-mockgoogle
     mem_limit: 128m
     command: ["/bin/mockgoogle"]
@@ -55,7 +55,7 @@ services:
 
   scheduler:
     restart: unless-stopped
-    image: wachen-crawler
+    image: wachen-backend
     container_name: wachen-scheduler
     mem_limit: 128m
     command: ["/bin/scheduler"]
@@ -72,7 +72,7 @@ services:
 
   worker:
     restart: unless-stopped
-    image: wachen-crawler
+    image: wachen-backend
     command: ["/bin/worker"]
     mem_limit: 128m
     environment:
@@ -88,7 +88,7 @@ services:
 
   ingestion:
     restart: unless-stopped
-    image: wachen-crawler
+    image: wachen-backend
     container_name: wachen-ingestion
     mem_limit: 128m
     command: ["/bin/ingestion"]
@@ -103,7 +103,7 @@ services:
 
   webhook:
     restart: unless-stopped
-    image: wachen-crawler
+    image: wachen-backend
     container_name: wachen-webhook
     mem_limit: 128m
     command: ["/bin/webhook"]
@@ -120,7 +120,7 @@ services:
 
   routing:
     restart: unless-stopped
-    image: wachen-crawler
+    image: wachen-backend
     container_name: wachen-routing
     mem_limit: 128m
     command: ["/bin/routing"]
@@ -154,7 +154,7 @@ services:
 
   replier:
     restart: unless-stopped
-    image: wachen-crawler
+    image: wachen-backend
     container_name: wachen-replier
     mem_limit: 128m
     command: ["/bin/replier"]
@@ -169,7 +169,7 @@ services:
 
   api:
     restart: unless-stopped
-    image: wachen-crawler
+    image: wachen-backend
     container_name: wachen-api
     mem_limit: 128m
     command: ["/bin/api"]
