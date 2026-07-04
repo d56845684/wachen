@@ -37,6 +37,14 @@ func (f *fakeAPIStore) CaseFacets(_ context.Context) ([]store.Facet, []store.Fac
 	return []store.Facet{{Value: "locations/mock-loc-1", Label: "一號店", Count: 3}},
 		[]store.Facet{{Value: "google_review_mock_a", Label: "google_review_mock_a", Count: 3}}, nil
 }
+func (f *fakeAPIStore) GetPipelineStats(_ context.Context) (*store.PipelineStats, error) {
+	p := &store.PipelineStats{}
+	p.Funnel.Reviews = 30
+	p.Funnel.AwaitingAnalysis = 5
+	p.AI.Models = []string{"gemini"}
+	p.AI.TotalAnalyses = 25
+	return p, nil
+}
 func (f *fakeAPIStore) GetCaseDetail(_ context.Context, _ string) (*store.CaseDetail, error) {
 	return f.detail, nil
 }
@@ -212,6 +220,26 @@ func TestFacetsRequiresAuth(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("facets without token: %d, want 401", resp.StatusCode)
+	}
+}
+
+func TestPipelineEndpoint(t *testing.T) {
+	ts := newServer(&fakeAPIStore{user: adminUser()})
+	defer ts.Close()
+	_, out := doLogin(t, ts, "admin@example.com", "Wachen!2026")
+
+	// 需認證
+	if resp, _ := http.Get(ts.URL + "/api/v1/pipeline"); resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("pipeline without token: %d, want 401", resp.StatusCode)
+	}
+	resp := authedReq(t, http.MethodGet, ts.URL+"/api/v1/pipeline", out["token"], "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("pipeline: %d", resp.StatusCode)
+	}
+	var p store.PipelineStats
+	_ = json.NewDecoder(resp.Body).Decode(&p)
+	if p.Funnel.Reviews != 30 || p.AI.TotalAnalyses != 25 || len(p.AI.Models) != 1 {
+		t.Errorf("pipeline stats = %+v", p)
 	}
 }
 

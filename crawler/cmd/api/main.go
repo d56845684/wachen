@@ -30,6 +30,7 @@ type apiStore interface {
 	AuthUser(ctx context.Context, email, password string) (*store.AuthedUser, error)
 	ListCases(ctx context.Context, f store.CaseFilter) ([]store.CaseSummary, error)
 	CaseFacets(ctx context.Context) (stores, sources []store.Facet, err error)
+	GetPipelineStats(ctx context.Context) (*store.PipelineStats, error)
 	GetCaseDetail(ctx context.Context, caseID string) (*store.CaseDetail, error)
 	UpdateCaseStatus(ctx context.Context, caseID, newStatus, actor string) error
 }
@@ -49,6 +50,7 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/login", s.login)
 	mux.Handle("GET /api/v1/cases", s.auth(s.listCases))
 	mux.Handle("GET /api/v1/facets", s.auth(s.facets))
+	mux.Handle("GET /api/v1/pipeline", s.auth(s.pipeline))
 	mux.Handle("GET /api/v1/cases/{id}", s.auth(s.caseDetail))
 	mux.Handle("PATCH /api/v1/cases/{id}/status", s.auth(s.updateStatus))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
@@ -142,6 +144,16 @@ func (s *server) facets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"stores": stores, "sources": sources})
+}
+
+func (s *server) pipeline(w http.ResponseWriter, r *http.Request) {
+	stats, err := s.st.GetPipelineStats(r.Context())
+	if err != nil {
+		s.log.Error("pipeline stats failed", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		return
+	}
+	writeJSON(w, http.StatusOK, stats)
 }
 
 func (s *server) caseDetail(w http.ResponseWriter, r *http.Request) {

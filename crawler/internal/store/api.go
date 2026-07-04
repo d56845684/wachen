@@ -147,6 +147,151 @@ func (s *Store) queryFacets(ctx context.Context, sql string) ([]Facet, error) {
 	return out, rows.Err()
 }
 
+type PipelineStats struct {
+	Funnel struct {
+		RawReviews       int `json:"raw_reviews"`
+		Reviews          int `json:"reviews"`
+		AwaitingAnalysis int `json:"awaiting_analysis"` // reviews.status = 'new'
+		Analyzed         int `json:"analyzed"`          // 有現行分析
+		AwaitingRouting  int `json:"awaiting_routing"`  // 已分析但未建案
+		Cased            int `json:"cased"`             // 有案件
+	} `json:"funnel"`
+	AI struct {
+		Models          []string `json:"models"`     // 現行分析用過的模型（heuristic / gemini）
+		TotalAnalyses   int      `json:"total_analyses"`
+		AvgLatencyMs    int      `json:"avg_latency_ms"`
+		MaxLatencyMs    int      `json:"max_latency_ms"`
+		QuarantineCount int      `json:"quarantine_count"`
+		Last5Min        int      `json:"last_5min"`
+		LastHour        int      `json:"last_hour"`
+		FallbackCount   int      `json:"fallback_count"` // Gemini 失敗降級 heuristic 的筆數
+	} `json:"ai"`
+	Risk      []Facet          `json:"risk"`
+	Sentiment []Facet          `json:"sentiment"`
+	Recent    []RecentAnalysis `json:"recent"`
+}
+
+type RecentAnalysis struct {
+	ReviewID   string    `json:"review_id"`
+	StoreName  string    `json:"store_name"`
+	SourceName string    `json:"source_name"`
+	RiskLevel  string    `json:"risk_level"`
+	Sentiment  string    `json:"sentiment"`
+	ModelName  string    `json:"model_name"`
+	LatencyMs  *int      `json:"latency_ms"`
+	Summary    string    `json:"summary"`
+	CreatedAt  time.Time `json:"created_at"`
+	Fallback   bool      `json:"fallback"`
+}
+
+// PipelineStats：AI 處理進度分頁的資料（排除 test_* 殘留）
+func (s *Store) GetPipelineStats(ctx context.Context) (*PipelineStats, error) {
+	var p PipelineStats
+	const notTest = "v.source_name NOT LIKE 'test_%'"
+
+	// 漏斗
+	if err := s.Pool.QueryRow(ctx, `
+		SELECT
+		  (SELECT count(*) FROM raw_reviews r WHERE r.source_name NOT LIKE 'test_%'),
+		  (SELECT count(*) FROM reviews v WHERE `+notTest+` AND v.deleted_at IS NULL),
+		  (SELECT count(*) FROM reviews v WHERE `+notTest+` AND v.deleted_at IS NULL AND v.status = 'new'),
+		  (SELECT count(*) FROM reviews v WHERE v.deleted_at IS NULL AND `+notTest+`
+		     AND EXISTS (SELECT 1 FROM analysis_results a WHERE a.review_id = v.id AND a.is_current)),
+		  (SELECT count(*) FROM reviews v WHERE v.deleted_at IS NULL AND `+notTest+`
+		     AND EXISTS (SELECT 1 FROM analysis_results a WHERE a.review_id = v.id AND a.is_current)
+		     AND NOT EXISTS (SELECT 1 FROM cases c WHERE c.review_id = v.id AND c.deleted_at IS NULL)),
+		  (SELECT count(*) FROM cases c JOIN reviews v ON v.id = c.review_id
+		     WHERE c.deleted_at IS NULL AND `+notTest+`)`).
+		Scan(&p.Funnel.RawReviews, &p.Funnel.Reviews, &p.Funnel.AwaitingAnalysis,
+			&p.Funnel.Analyzed, &p.Funnel.AwaitingRouting, &p.Funnel.Cased); err != nil {
+		return nil, err
+	}
+
+	// AI 統計（現行分析）
+	if err := s.Pool.QueryRow(ctx, `
+		SELECT count(*),
+		       coalesce(round(avg(latency_ms)), 0), coalesce(max(latency_ms), 0),
+		       count(*) FILTER (WHERE created_at > now() - interval '5 minutes'),
+		       count(*) FILTER (WHERE created_at > now() - interval '1 hour'),
+		       count(*) FILTER (WHERE raw_response ? 'fallback_from')
+		FROM analysis_results a
+		WHERE a.is_current AND a.deleted_at IS NULL
+		  AND EXISTS (SELECT 1 FROM reviews v WHERE v.id = a.review_id AND `+notTest+`)`).
+		Scan(&p.AI.TotalAnalyses, &p.AI.AvgLatencyMs, &p.AI.MaxLatencyMs,
+			&p.AI.Last5Min, &p.AI.LastHour, &p.AI.FallbackCount); err != nil {
+		return nil, err
+	}
+	if err := s.Pool.QueryRow(ctx,
+		`SELECT count(*) FROM ingest_quarantine`).Scan(&p.AI.QuarantineCount); err != nil {
+		return nil, err
+	}
+	models, err := s.scanStrings(ctx, `
+		SELECT DISTINCT model_name FROM analysis_results
+		WHERE is_current AND deleted_at IS NULL ORDER BY model_name`)
+	if err != nil {
+		return nil, err
+	}
+	p.AI.Models = models
+
+	// 風險與情緒分布（現行分析）
+	if p.Risk, err = s.queryFacets(ctx, `
+		SELECT a.risk_level, a.risk_level, count(*)
+		FROM analysis_results a JOIN reviews v ON v.id = a.review_id
+		WHERE a.is_current AND a.deleted_at IS NULL AND `+notTest+`
+		GROUP BY 1 ORDER BY array_position(ARRAY['high','medium','low'], a.risk_level)`); err != nil {
+		return nil, err
+	}
+	if p.Sentiment, err = s.queryFacets(ctx, `
+		SELECT a.sentiment, a.sentiment, count(*)
+		FROM analysis_results a JOIN reviews v ON v.id = a.review_id
+		WHERE a.is_current AND a.deleted_at IS NULL AND `+notTest+` AND a.sentiment IS NOT NULL
+		GROUP BY 1 ORDER BY 3 DESC`); err != nil {
+		return nil, err
+	}
+
+	// 最近 15 筆分析
+	rows, err := s.Pool.Query(ctx, `
+		SELECT v.id, coalesce(st.name, ''), v.source_name,
+		       a.risk_level, coalesce(a.sentiment, ''), a.model_name, a.latency_ms,
+		       coalesce(a.summary, ''), a.created_at, (a.raw_response ? 'fallback_from')
+		FROM analysis_results a
+		JOIN reviews v ON v.id = a.review_id
+		LEFT JOIN stores st ON st.id = v.store_id AND st.deleted_at IS NULL
+		WHERE a.is_current AND a.deleted_at IS NULL AND `+notTest+`
+		ORDER BY a.created_at DESC LIMIT 15`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	p.Recent = []RecentAnalysis{}
+	for rows.Next() {
+		var r RecentAnalysis
+		if err := rows.Scan(&r.ReviewID, &r.StoreName, &r.SourceName, &r.RiskLevel,
+			&r.Sentiment, &r.ModelName, &r.LatencyMs, &r.Summary, &r.CreatedAt, &r.Fallback); err != nil {
+			return nil, err
+		}
+		p.Recent = append(p.Recent, r)
+	}
+	return &p, rows.Err()
+}
+
+func (s *Store) scanStrings(ctx context.Context, sql string) ([]string, error) {
+	rows, err := s.Pool.Query(ctx, sql)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var v string
+		if err := rows.Scan(&v); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
 type CaseDetail struct {
 	CaseSummary
 	ReviewContent string          `json:"review_content"`

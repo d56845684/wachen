@@ -81,6 +81,18 @@ ok = bool(d.get('review_content') is not None and d.get('assignments') and d.get
 print(1 if ok else 0)" 2>/dev/null || echo 0)
 check "案件詳情含留言/指派/原始連結" "1" "$detail_ok"
 
+echo "== 3b. AI 處理進度分頁 =="
+pipe_ok=$($WCURL -H "Authorization: Bearer $TOKEN" "$BASE/api/v1/pipeline" | python3 -c "
+import json,sys
+d = json.load(sys.stdin)
+ok = ('funnel' in d and 'raw_reviews' in d['funnel'] and 'ai' in d
+      and isinstance(d['ai'].get('models'), list) and 'recent' in d and 'risk' in d)
+print(1 if ok else 0)" 2>/dev/null || echo 0)
+check "pipeline 端點含漏斗/AI/風險/最近分析" "1" "$pipe_ok"
+
+pipe_auth=$($WCURL -o /dev/null -w '%{http_code}' "$BASE/api/v1/pipeline")
+check "pipeline 需認證（401）" "401" "$pipe_auth"
+
 echo "== 4. 狀態變更（稽核 actor = 登入使用者）=="
 patched=$($WCURL -o /dev/null -w '%{http_code}' -X PATCH \
     -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \

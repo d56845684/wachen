@@ -49,6 +49,7 @@
 | `google_review_mock_b` | google_review | ✅ | `* * * * *` | 指向 mockgoogle 的 mock-loc-2（PoC 展示） |
 | `google_review_main` | google_review | ❌ | `*/15 * * * *` | 真實 Google API，等憑證就緒後填 config 啟用 |
 | `webhook_generic` | webhook_generic | ✅ | —（推送型） | 官網/APP 留言入口 |
+| `google_places_wacheng` | webhook_generic | ✅ | —（手動腳本） | 台北瓦城集團品牌 Google 評論；`make crawl-wacheng` 經 Places API 抓取後推入（每店上限 5 則，官方限制） |
 
 > 注意：整合測試（`make test-integration`）會在 `sources` 表留下 `test_*` 殘料。2026-07-04 已清理一輪：可刪的已刪，剩 9 筆因被 append-only 的 `raw_reviews` 引用而無法硬刪，均為 disabled。建議在整合測試加 teardown 避免再累積。
 

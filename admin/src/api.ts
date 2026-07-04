@@ -85,6 +85,43 @@ export interface CaseFilters {
   source: string;
 }
 
+export interface RecentAnalysis {
+  review_id: string;
+  store_name: string;
+  source_name: string;
+  risk_level: "high" | "medium" | "low";
+  sentiment: string;
+  model_name: string;
+  latency_ms: number | null;
+  summary: string;
+  created_at: string;
+  fallback: boolean;
+}
+
+export interface PipelineStats {
+  funnel: {
+    raw_reviews: number;
+    reviews: number;
+    awaiting_analysis: number;
+    analyzed: number;
+    awaiting_routing: number;
+    cased: number;
+  };
+  ai: {
+    models: string[];
+    total_analyses: number;
+    avg_latency_ms: number;
+    max_latency_ms: number;
+    quarantine_count: number;
+    last_5min: number;
+    last_hour: number;
+    fallback_count: number;
+  };
+  risk: Facet[];
+  sentiment: Facet[];
+  recent: RecentAnalysis[];
+}
+
 export const api = {
   login: (email: string, password: string) =>
     request<{ token: string; name: string }>("/login", {
@@ -96,6 +133,7 @@ export const api = {
     return request<{ cases: CaseSummary[] }>(`/cases?${q}`);
   },
   facets: () => request<{ stores: Facet[]; sources: Facet[] }>("/facets"),
+  pipeline: () => request<PipelineStats>("/pipeline"),
   caseDetail: (id: string) => request<CaseDetail>(`/cases/${id}`),
   updateStatus: (id: string, status: string) =>
     request<{ status: string }>(`/cases/${id}/status`, {

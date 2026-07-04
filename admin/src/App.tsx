@@ -1,9 +1,17 @@
 import { ReactNode } from "react";
-import { BrowserRouter, Navigate, Route, Routes, useNavigate } from "react-router-dom";
+import {
+  BrowserRouter,
+  Navigate,
+  NavLink,
+  Route,
+  Routes,
+  useNavigate,
+} from "react-router-dom";
 import { auth } from "./api";
 import Login from "./pages/Login";
 import Inbox from "./pages/Inbox";
 import CaseDetailPage from "./pages/CaseDetail";
+import Pipeline from "./pages/Pipeline";
 
 function Shell({ children }: { children: ReactNode }) {
   const nav = useNavigate();
@@ -13,6 +21,14 @@ function Shell({ children }: { children: ReactNode }) {
       <header className="topbar">
         <div className="brand-seal">哨</div>
         <h1>負評哨站</h1>
+        <nav className="topnav">
+          <NavLink to="/" end className={({ isActive }) => (isActive ? "on" : "")}>
+            收件匣
+          </NavLink>
+          <NavLink to="/pipeline" className={({ isActive }) => (isActive ? "on" : "")}>
+            AI 進度
+          </NavLink>
+        </nav>
         <div className="spacer" />
         <span className="user">{auth.name()}</span>
         <button
@@ -36,6 +52,7 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/" element={<Shell><Inbox /></Shell>} />
+        <Route path="/pipeline" element={<Shell><Pipeline /></Shell>} />
         <Route path="/cases/:id" element={<Shell><CaseDetailPage /></Shell>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

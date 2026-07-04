@@ -118,6 +118,13 @@ button { font-family: var(--sans); cursor: pointer; }
 }
 .topbar .brand-seal { width: 36px; height: 36px; font-size: 16px; border-width: 2px; }
 .topbar h1 { font-family: var(--serif); font-size: 18px; font-weight: 900; letter-spacing: 2px; }
+.topnav { display: flex; gap: 4px; margin-left: 20px; }
+.topnav a {
+  color: var(--muted); font-size: 14px; padding: 6px 14px; border-radius: 5px;
+  text-decoration: none; border: 1px solid transparent;
+}
+.topnav a:hover { color: var(--text); text-decoration: none; }
+.topnav a.on { color: var(--paper); border-color: var(--line-strong); background: var(--panel-2); }
 .topbar .spacer { flex: 1; }
 .topbar .user { color: var(--muted); font-size: 13px; }
 .btn-ghost {
@@ -235,3 +242,47 @@ blockquote.review {
 .notif .st.failed { color: var(--vermilion); }
 .notif .who { color: var(--muted); flex: none; }
 .loading { color: var(--faint); text-align: center; padding: 60px; font-family: var(--mono); }
+
+/* ---------- AI 處理進度 ---------- */
+.pl-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 18px; }
+.pl-head h2 { font-family: var(--serif); font-size: 22px; font-weight: 900; }
+.pl-live { color: var(--jade); font-size: 12px; font-family: var(--mono); display: inline-flex; align-items: center; gap: 6px; }
+.pl-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--jade); display: inline-block; animation: ping 1s ease-out; }
+@keyframes ping { from { box-shadow: 0 0 0 0 var(--jade); } to { box-shadow: 0 0 0 6px transparent; } }
+
+.funnel { display: flex; flex-direction: column; gap: 10px; }
+.fn-row { display: grid; grid-template-columns: 96px 1fr 56px 120px; align-items: center; gap: 12px; }
+.fn-label { font-size: 13px; color: var(--text); }
+.fn-bar-wrap { background: var(--ink-2); border-radius: 4px; height: 22px; overflow: hidden; }
+.fn-bar { height: 100%; background: linear-gradient(90deg, var(--jade), #6cc79b); border-radius: 4px; transition: width 0.5s cubic-bezier(0.2,0.8,0.2,1); }
+.fn-bar.warn { background: linear-gradient(90deg, var(--amber), #f0b95f); }
+.fn-val { font-family: var(--mono); font-size: 15px; text-align: right; color: var(--text); }
+.fn-val.warn { color: var(--amber); font-weight: 600; }
+.fn-note { font-family: var(--mono); font-size: 11px; color: var(--faint); }
+
+.stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+@media (max-width: 800px) { .stat-grid { grid-template-columns: repeat(2, 1fr); } }
+.stat { background: var(--ink-2); border: 1px solid var(--line); border-radius: 6px; padding: 12px; text-align: center; }
+.stat-val { font-family: var(--mono); font-size: 20px; font-weight: 600; color: var(--text); }
+.stat-val.warn { color: var(--amber); }
+.stat-label { font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+.risk-dist { display: flex; flex-direction: column; gap: 10px; }
+.rd-row { display: grid; grid-template-columns: 34px 60px 1fr 40px; align-items: center; gap: 10px; }
+.rd-label { font-size: 13px; color: var(--muted); }
+.rd-bar-wrap { background: var(--ink-2); border-radius: 4px; height: 16px; overflow: hidden; }
+.rd-bar { height: 100%; border-radius: 4px; transition: width 0.5s; }
+.rd-bar.high { background: var(--vermilion); }
+.rd-bar.medium { background: var(--amber); }
+.rd-bar.low { background: var(--jade); }
+.rd-val { font-family: var(--mono); font-size: 13px; text-align: right; color: var(--text); }
+
+.recent { display: flex; flex-direction: column; }
+.rec-row { display: flex; gap: 12px; align-items: flex-start; padding: 10px 0; border-bottom: 1px dashed var(--line); }
+.rec-row:last-child { border-bottom: none; }
+.rec-main { flex: 1; min-width: 0; }
+.rec-meta { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
+.rec-model { font-family: var(--mono); font-size: 11px; color: var(--amber); }
+.rec-lat { font-family: var(--mono); font-size: 11px; color: var(--faint); }
+.rec-time { font-family: var(--mono); font-size: 11px; color: var(--faint); margin-left: auto; }
+.rec-summary { font-family: var(--serif); font-size: 14px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; }
