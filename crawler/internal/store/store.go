@@ -243,38 +243,44 @@ func (s *Store) ReapStaleJobs(ctx context.Context, runningTimeout, pendingTimeou
 
 type InsertResult struct {
 	ID       string
-	Inserted bool // false = 同版本已存在（冪等跳過），ID 仍為既有列
+	Inserted bool // false = 與最新版本同內容（冪等跳過），ID 為最新版本列
 }
 
-// InsertRawReviews 整批一個交易寫入（效能修正）。
-// 版本化冪等（T1-A）：同 (source, external_id, content_hash) 跳過並回查既有 id——
-// 內容變了（編輯）就是新列。不用 ON CONFLICT DO UPDATE：raw_reviews 有防篡改 trigger。
+// InsertRawReviews 整批一個交易寫入。
+// 「連續去重」：只有與**最新版本**內容相同才跳過——與更早版本相同（A→B→A 回改）
+// 必須成為新版本，否則回改被靜默丟棄且防回捲會把內容卡死在 B（外部審查 P1-1）。
+// 以 advisory xact lock 序列化同一則評論的並發寫入。
 func (s *Store) InsertRawReviews(ctx context.Context, reviews []adapter.RawReview, jobID string) ([]InsertResult, error) {
 	out := make([]InsertResult, 0, len(reviews))
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
 		for _, r := range reviews {
-			var id string
-			scanErr := tx.QueryRow(ctx, `
-				INSERT INTO raw_reviews
-				    (source_name, external_id, payload, content_hash, source_url, location_id, fetched_at, crawl_job_id)
-				VALUES ($1, $2, $3, $4, $5, nullif($6, ''), $7, $8)
-				ON CONFLICT (source_name, external_id, content_hash) DO NOTHING
-				RETURNING id`,
-				r.SourceName, r.ExternalID, r.Payload, r.ContentHash,
-				r.SourceURL, r.LocationID, r.FetchedAt, jobID).Scan(&id)
-			if errors.Is(scanErr, pgx.ErrNoRows) {
-				// 既有版本：回查 id，讓 caller 仍可補發事件（2A）
-				if err := tx.QueryRow(ctx, `
-					SELECT id FROM raw_reviews
-					WHERE source_name = $1 AND external_id = $2 AND content_hash = $3`,
-					r.SourceName, r.ExternalID, r.ContentHash).Scan(&id); err != nil {
-					return err
-				}
-				out = append(out, InsertResult{ID: id, Inserted: false})
+			if _, err := tx.Exec(ctx,
+				"SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+				r.SourceName+"|"+r.ExternalID); err != nil {
+				return err
+			}
+			var latestID, latestHash string
+			err := tx.QueryRow(ctx, `
+				SELECT id, content_hash FROM raw_reviews
+				WHERE source_name = $1 AND external_id = $2
+				ORDER BY created_at DESC, id DESC LIMIT 1`,
+				r.SourceName, r.ExternalID).Scan(&latestID, &latestHash)
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+			if err == nil && latestHash == r.ContentHash {
+				out = append(out, InsertResult{ID: latestID, Inserted: false})
 				continue
 			}
-			if scanErr != nil {
-				return scanErr
+			var id string
+			if err := tx.QueryRow(ctx, `
+				INSERT INTO raw_reviews
+				    (source_name, external_id, payload, content_hash, source_url, location_id, fetched_at, crawl_job_id)
+				VALUES ($1, $2, $3, $4, $5, nullif($6, ''), $7, nullif($8, '')::uuid)
+				RETURNING id`,
+				r.SourceName, r.ExternalID, r.Payload, r.ContentHash,
+				r.SourceURL, r.LocationID, r.FetchedAt, jobID).Scan(&id); err != nil {
+				return err
 			}
 			out = append(out, InsertResult{ID: id, Inserted: true})
 		}
@@ -284,6 +290,249 @@ func (s *Store) InsertRawReviews(ctx context.Context, reviews []adapter.RawRevie
 		return nil, err
 	}
 	return out, nil
+}
+
+// EnabledWebhookSource 查啟用中的推送型來源與其驗證密鑰
+func (s *Store) EnabledWebhookSource(ctx context.Context, name string) (string, bool, error) {
+	var secret *string
+	err := s.Pool.QueryRow(ctx, `
+		SELECT config->>'webhook_secret' FROM sources
+		WHERE name = $1 AND enabled AND deleted_at IS NULL`, name).Scan(&secret)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	if secret == nil {
+		return "", true, nil // 來源存在但沒設密鑰 → handler 會拒絕所有請求
+	}
+	return *secret, true, nil
+}
+
+// RawForIngest 是 ingestion 消費 review.raw 時需要的完整上下文
+type RawForIngest struct {
+	ID          string
+	SourceName  string
+	Adapter     string // 由 sources 表 join，決定用哪個 normalizer
+	ExternalID  string
+	Payload     []byte
+	SourceURL   string
+	LocationID  string
+	RawCreated  time.Time
+}
+
+func (s *Store) GetRawForIngest(ctx context.Context, rawReviewID string) (*RawForIngest, error) {
+	var r RawForIngest
+	var sourceURL, locationID *string
+	err := s.Pool.QueryRow(ctx, `
+		SELECT r.id, r.source_name, s.adapter, r.external_id, r.payload,
+		       r.source_url, r.location_id, r.created_at
+		FROM raw_reviews r
+		JOIN sources s ON s.name = r.source_name
+		WHERE r.id = $1`, rawReviewID).
+		Scan(&r.ID, &r.SourceName, &r.Adapter, &r.ExternalID, &r.Payload,
+			&sourceURL, &locationID, &r.RawCreated)
+	if err != nil {
+		return nil, err
+	}
+	if sourceURL != nil {
+		r.SourceURL = *sourceURL
+	}
+	if locationID != nil {
+		r.LocationID = *locationID
+	}
+	return &r, nil
+}
+
+// UpsertReviewParams 是正規化後要落 reviews 表的欄位
+type UpsertReviewParams struct {
+	RawReviewID string
+	SourceName  string
+	ExternalID  string
+	AuthorName  string
+	Rating      *float64
+	Content     string
+	PostedAt    *time.Time
+	SourceURL   string
+	LocationID  string // 由此解析 store_id（stores.google_location_id）
+}
+
+// UpsertOutcome 決定要不要（重）發 review.created 與是否重新分析：
+//   Applied    ：首見或正規化內容有變 → status='new'、發事件
+//   PointerOnly：raw 版本前進但顧客內容未變（如商家回覆、updateTime 抖動）
+//                → 只更新指標欄位，status 不動、不發事件（否則 M7 回覆會自我觸發重分析）
+//   Replay     ：同 raw 重放（publish 失敗後重試）→ 補發事件，下游冪等
+//   Stale      ：嚴格過時版本（事件亂序）→ 不動、不發
+//   Deleted    ：目標已軟刪除 → 不復活、不發（否則殭屍列進 M4）
+type UpsertOutcome int
+
+const (
+	UpsertApplied UpsertOutcome = iota
+	UpsertPointerOnly
+	UpsertReplay
+	UpsertStale
+	UpsertDeleted
+)
+
+func (o UpsertOutcome) String() string {
+	return [...]string{"applied", "pointer_only", "replay", "stale", "deleted"}[o]
+}
+
+// UpsertReview：一則評論（source, external_id）只有一列。
+// 顯式兩步（SELECT FOR UPDATE → 比對 → UPDATE）而非 ON CONFLICT 巧技——
+// 需要區分五種結果，明確勝於聰明。audit trigger 自動留痕舊值。
+func (s *Store) UpsertReview(ctx context.Context, p UpsertReviewParams) (string, UpsertOutcome, error) {
+	var id string
+	var outcome UpsertOutcome
+	err := s.withTx(ctx, func(tx pgx.Tx) error {
+		var cur struct {
+			rawID      string
+			content    string
+			rating     *float64
+			deletedAt  *time.Time
+			rawCreated time.Time
+		}
+		scanErr := tx.QueryRow(ctx, `
+			SELECT v.id, v.raw_review_id, v.content, v.rating, v.deleted_at, r.created_at
+			FROM reviews v JOIN raw_reviews r ON r.id = v.raw_review_id
+			WHERE v.source_name = $1 AND v.external_id = $2
+			FOR UPDATE OF v`,
+			p.SourceName, p.ExternalID).
+			Scan(&id, &cur.rawID, &cur.content, &cur.rating, &cur.deletedAt, &cur.rawCreated)
+
+		if errors.Is(scanErr, pgx.ErrNoRows) {
+			outcome = UpsertApplied
+			return tx.QueryRow(ctx, `
+				INSERT INTO reviews
+				    (raw_review_id, source_name, external_id, author_name, rating,
+				     content, posted_at, source_url, store_id, status)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
+				        (SELECT id FROM stores WHERE google_location_id = nullif($9, '') AND deleted_at IS NULL),
+				        'new')
+				RETURNING id`,
+				p.RawReviewID, p.SourceName, p.ExternalID, p.AuthorName, p.Rating,
+				p.Content, p.PostedAt, p.SourceURL, p.LocationID).Scan(&id)
+		}
+		if scanErr != nil {
+			return scanErr
+		}
+		if cur.deletedAt != nil {
+			outcome = UpsertDeleted
+			return nil
+		}
+		if cur.rawID == p.RawReviewID {
+			outcome = UpsertReplay
+			return nil
+		}
+		var newCreated time.Time
+		if err := tx.QueryRow(ctx,
+			`SELECT created_at FROM raw_reviews WHERE id = $1`, p.RawReviewID).Scan(&newCreated); err != nil {
+			return err
+		}
+		// 嚴格較舊才算 Stale；平手（同批交易時戳）以到達順序為準（外部審查 P2-8）
+		if newCreated.Before(cur.rawCreated) {
+			outcome = UpsertStale
+			return nil
+		}
+		contentChanged := cur.content != p.Content || !floatPtrEq(cur.rating, p.Rating)
+		if contentChanged {
+			outcome = UpsertApplied
+		} else {
+			outcome = UpsertPointerOnly
+		}
+		_, err := tx.Exec(ctx, `
+			UPDATE reviews SET
+			    raw_review_id = $2,
+			    author_name   = $3,
+			    rating        = $4,
+			    content       = $5,
+			    posted_at     = $6,
+			    source_url    = $7,
+			    store_id      = coalesce((SELECT id FROM stores WHERE google_location_id = nullif($8, '') AND deleted_at IS NULL), store_id),
+			    status        = CASE WHEN $9 THEN 'new' ELSE status END
+			WHERE id = $1`,
+			id, p.RawReviewID, p.AuthorName, p.Rating, p.Content, p.PostedAt,
+			p.SourceURL, p.LocationID, contentChanged)
+		return err
+	})
+	return id, outcome, err
+}
+
+func floatPtrEq(a, b *float64) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
+// FindUnreflectedRaws 找「最新版本尚未反映到 reviews」的 raw id——
+// ingestion 對帳掃描第一條腿：死信、漏發的 review.raw、亂序殘留。
+// 排除 ingest_quarantine（normalize 失敗的毒藥 raw，否則每輪重撿無限迴圈）。
+// olderThan 避開仍在佇列中的 in-flight 事件。
+func (s *Store) FindUnreflectedRaws(ctx context.Context, olderThan time.Duration, limit int) ([]string, error) {
+	rows, err := s.Pool.Query(ctx, `
+		SELECT latest.id FROM (
+		    SELECT DISTINCT ON (r.source_name, r.external_id) r.id, v.id AS reflected
+		    FROM raw_reviews r
+		    JOIN sources s ON s.name = r.source_name AND s.deleted_at IS NULL
+		    LEFT JOIN reviews v
+		      ON v.source_name = r.source_name
+		     AND v.external_id = r.external_id
+		     AND v.raw_review_id = r.id
+		    WHERE r.created_at < now() - $1::interval
+		    ORDER BY r.source_name, r.external_id, r.created_at DESC, r.id DESC
+		) latest
+		LEFT JOIN ingest_quarantine q ON q.raw_review_id = latest.id
+		WHERE latest.reflected IS NULL AND q.raw_review_id IS NULL
+		LIMIT $2`, olderThan.String(), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+// FindStaleNewReviews 對帳掃描第二條腿：status='new' 卻遲遲沒被 M4 消化的 reviews，
+// 重發 review.created——堵「upsert 已 commit 但 publish 重試耗盡」的黑洞
+// （該情況下 raw 與 reviews 完全一致，第一條腿看不見；外部審查 P1-2）。
+func (s *Store) FindStaleNewReviews(ctx context.Context, olderThan time.Duration, limit int) ([]string, error) {
+	rows, err := s.Pool.Query(ctx, `
+		SELECT id FROM reviews
+		WHERE status = 'new' AND deleted_at IS NULL
+		  AND updated_at < now() - $1::interval
+		LIMIT $2`, olderThan.String(), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+// QuarantineRaw 隔離 normalize 失敗的 raw；人工修復後 DELETE 該列即重入掃描
+func (s *Store) QuarantineRaw(ctx context.Context, rawReviewID, reason string) error {
+	return s.withTx(ctx, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `
+			INSERT INTO ingest_quarantine (raw_review_id, reason)
+			VALUES ($1, $2) ON CONFLICT (raw_review_id) DO NOTHING`, rawReviewID, reason)
+		return err
+	})
 }
 
 // LeaderLock 是帶心跳的 advisory lock：PG 斷線會使鎖被伺服器釋放，

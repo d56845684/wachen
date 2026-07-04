@@ -18,14 +18,11 @@ package main
 import (
 	"context"
 	"log/slog"
-	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/robfig/cron/v3"
 
-	"github.com/ikala/wachen/crawler/internal/envutil"
+	"github.com/ikala/wachen/crawler/internal/bootstrap"
 	"github.com/ikala/wachen/crawler/internal/queue"
 	"github.com/ikala/wachen/crawler/internal/store"
 )
@@ -37,25 +34,9 @@ const (
 )
 
 func main() {
-	log := slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("svc", "scheduler")
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-
-	st, err := store.New(ctx, envutil.Must("DATABASE_URL"), "svc:scheduler")
-	if err != nil {
-		log.Error("db connect failed", "err", err)
-		os.Exit(1)
-	}
-	q, err := queue.New(ctx, envutil.Must("NATS_URL"))
-	if err != nil {
-		log.Error("nats connect failed", "err", err)
-		os.Exit(1)
-	}
-	defer q.Close()
-	if err := q.EnsureStreams(ctx); err != nil {
-		log.Error("ensure streams failed", "err", err)
-		os.Exit(1)
-	}
+	svc := bootstrap.MustInit("scheduler", "svc:scheduler")
+	defer svc.Close()
+	ctx, log, st, q := svc.Ctx, svc.Log, svc.Store, svc.Queue
 
 	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
 
@@ -165,7 +146,7 @@ func scheduleOne(ctx context.Context, st *store.Store, q *queue.Queue,
 	if err := q.PublishCrawlJob(ctx, src.Adapter, jobID); err != nil {
 		return err
 	}
-	slog.Info("job scheduled", "source", src.Name, "location", loc, "job_id", jobID)
+	slog.Default().Info("job scheduled", "source", src.Name, "location", loc, "job_id", jobID)
 	return nil
 }
 

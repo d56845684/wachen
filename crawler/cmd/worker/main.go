@@ -14,14 +14,11 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/ikala/wachen/crawler/internal/adapter"
 	"github.com/ikala/wachen/crawler/internal/adapter/google"
-	"github.com/ikala/wachen/crawler/internal/envutil"
-	"github.com/ikala/wachen/crawler/internal/queue"
+	"github.com/ikala/wachen/crawler/internal/bootstrap"
 	"github.com/ikala/wachen/crawler/internal/store"
 )
 
@@ -43,27 +40,12 @@ func main() {
 	if workerID == "" {
 		workerID, _ = os.Hostname()
 	}
-	log := slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("svc", "crawler-worker", "worker_id", workerID)
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-
 	adapter.Register(google.New())
 
-	st, err := store.New(ctx, envutil.Must("DATABASE_URL"), "svc:crawler-worker:"+workerID)
-	if err != nil {
-		log.Error("db connect failed", "err", err)
-		os.Exit(1)
-	}
-	q, err := queue.New(ctx, envutil.Must("NATS_URL"))
-	if err != nil {
-		log.Error("nats connect failed", "err", err)
-		os.Exit(1)
-	}
-	defer q.Close()
-	if err := q.EnsureStreams(ctx); err != nil {
-		log.Error("ensure streams failed", "err", err)
-		os.Exit(1)
-	}
+	svc := bootstrap.MustInit("crawler-worker", "svc:crawler-worker:"+workerID)
+	defer svc.Close()
+	ctx, st, q := svc.Ctx, svc.Store, svc.Queue
+	log := svc.Log.With("worker_id", workerID)
 
 	cc, err := q.ConsumeCrawlJobs(ctx, func(ctx context.Context, jobID string, attempt uint64, isFinal bool) error {
 		return runJob(ctx, log, st, q, workerID, jobID, attempt, isFinal)

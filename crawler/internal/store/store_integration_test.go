@@ -176,13 +176,24 @@ func TestIntegrationInsertRawReviewsVersioned(t *testing.T) {
 		t.Fatalf("edited review must be a new version row, got %+v", res[0])
 	}
 
+	// 回改（A→B→A）：內容 hash 等於 v1，但因為不是「最新版本」→ 必須成為第三個版本
+	// （外部審查 P1-1：否則回改被去重、防回捲把內容永久卡在 B）
+	v3 := v1
+	res, err = st.InsertRawReviews(ctx, []adapter.RawReview{v3}, jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res[0].Inserted {
+		t.Fatal("revert to earlier content must create a NEW version, not dedupe against old one")
+	}
+
 	var versions int
 	if err := st.Pool.QueryRow(ctx, `
 		SELECT count(*) FROM raw_reviews WHERE source_name = $1 AND external_id = 'ext-1'`, src).Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if versions != 2 {
-		t.Errorf("versions = %d, want 2", versions)
+	if versions != 3 {
+		t.Errorf("versions = %d, want 3 (v1, v2-edit, v3-revert)", versions)
 	}
 
 	// 稽核鏈：兩個版本的寫入都在 audit_logs（trigger 已改 SECURITY DEFINER）
@@ -193,8 +204,8 @@ func TestIntegrationInsertRawReviewsVersioned(t *testing.T) {
 		  AND new_data->>'source_name' = $1`, src).Scan(&audited); err != nil {
 		t.Fatal(err)
 	}
-	if audited != 2 {
-		t.Errorf("audit_logs entries = %d, want 2", audited)
+	if audited != 3 {
+		t.Errorf("audit_logs entries = %d, want 3", audited)
 	}
 
 	if err := st.FinishJob(ctx, jobID, "succeeded", nil, JobStats{}, ""); err != nil {
@@ -318,6 +329,285 @@ func TestIntegrationLeaderLock(t *testing.T) {
 		t.Fatalf("re-acquire after release = %v, %v; want true", ok3, err)
 	}
 	lock3.Release()
+}
+
+// M3：upsert 三種 outcome（Applied/Replay/Stale）與 store_id 解析
+func TestIntegrationUpsertReviewVersionFlow(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	suffix := time.Now().UnixNano()
+	loc := fmt.Sprintf("locations/up-%d", suffix)
+	src := fmt.Sprintf("test_up_%d", suffix)
+
+	// 準備：來源（GetRawForIngest 要 join adapter）、門市、job
+	mustExec(t, st, `
+		INSERT INTO sources (name, adapter, config, enabled, created_by, updated_by)
+		VALUES ($1, 'google_review', '{}', false, 'test:store-integration', 'test:store-integration')`, src)
+	mustExec(t, st, `
+		INSERT INTO stores (name, google_location_id, google_place_id, created_by, updated_by)
+		VALUES ('Upsert 測試店', $1, 'p-up', 'test:store-integration', 'test:store-integration')`, loc)
+	srcID := createTestSource(t, st, `{}`)
+	jobID, _ := st.CreateJob(ctx, srcID, loc, nil)
+
+	mkRaw := func(hash, comment string) string {
+		res, err := st.InsertRawReviews(ctx, []adapter.RawReview{{
+			SourceName: src, ExternalID: "up-1",
+			Payload:     json.RawMessage(fmt.Sprintf(`{"starRating": "ONE", "comment": %q, "reviewer": {"displayName": "測"}}`, comment)),
+			ContentHash: hash, SourceURL: "https://x", LocationID: loc,
+			FetchedAt: time.Now().UTC(),
+		}}, jobID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res[0].ID
+	}
+	params := func(rawID, content string) UpsertReviewParams {
+		rating := 1.0
+		return UpsertReviewParams{
+			RawReviewID: rawID, SourceName: src, ExternalID: "up-1",
+			AuthorName: "測", Rating: &rating, Content: content,
+			SourceURL: "https://x", LocationID: loc,
+		}
+	}
+
+	// v1 → Applied + store_id 解析成功
+	rawV1 := mkRaw("h1", "難吃")
+	revID, outcome, err := st.UpsertReview(ctx, params(rawV1, "難吃"))
+	if err != nil || outcome != UpsertApplied {
+		t.Fatalf("v1 = %v, %v; want Applied", outcome, err)
+	}
+	var storeName, status string
+	if err := st.Pool.QueryRow(ctx, `
+		SELECT s.name, r.status FROM reviews r JOIN stores s ON s.id = r.store_id
+		WHERE r.id = $1`, revID).Scan(&storeName, &status); err != nil {
+		t.Fatal(err)
+	}
+	if storeName != "Upsert 測試店" || status != "new" {
+		t.Errorf("store = %s, status = %s", storeName, status)
+	}
+
+	// 同 raw 重放 → Replay（同一列、內容不變）
+	_, outcome, err = st.UpsertReview(ctx, params(rawV1, "難吃"))
+	if err != nil || outcome != UpsertReplay {
+		t.Fatalf("replay = %v, %v; want Replay", outcome, err)
+	}
+
+	// 模擬分析完成後，v2（編輯）到達 → Applied、內容更新、status 重回 new
+	mustExec(t, st, `UPDATE reviews SET status = 'analyzed' WHERE id = $1`, revID)
+	rawV2 := mkRaw("h2", "難吃，吃完中毒")
+	revID2, outcome, err := st.UpsertReview(ctx, params(rawV2, "難吃，吃完中毒"))
+	if err != nil || outcome != UpsertApplied || revID2 != revID {
+		t.Fatalf("v2 = %v, %v, id=%s; want Applied same row", outcome, err, revID2)
+	}
+	var content string
+	if err := st.Pool.QueryRow(ctx, `SELECT content, status FROM reviews WHERE id = $1`, revID).
+		Scan(&content, &status); err != nil {
+		t.Fatal(err)
+	}
+	if content != "難吃，吃完中毒" || status != "new" {
+		t.Errorf("content = %q, status = %s; edit must reset to new", content, status)
+	}
+
+	// v1 亂序重到 → Stale，不得回捲內容
+	_, outcome, err = st.UpsertReview(ctx, params(rawV1, "難吃"))
+	if err != nil || outcome != UpsertStale {
+		t.Fatalf("stale = %v, %v; want Stale", outcome, err)
+	}
+	_ = st.Pool.QueryRow(ctx, `SELECT content FROM reviews WHERE id = $1`, revID).Scan(&content)
+	if content != "難吃，吃完中毒" {
+		t.Errorf("stale version rolled back content to %q", content)
+	}
+
+	// v3：raw 版本前進但顧客內容零變化（模擬商家回覆 bump payload）
+	// → PointerOnly：指標更新、status 保持 'analyzed' 不重觸發分析
+	mustExec(t, st, `UPDATE reviews SET status = 'analyzed' WHERE id = $1`, revID)
+	rawV3 := mkRaw("h3", "難吃，吃完中毒")
+	_, outcome, err = st.UpsertReview(ctx, params(rawV3, "難吃，吃完中毒"))
+	if err != nil || outcome != UpsertPointerOnly {
+		t.Fatalf("pointer-only = %v, %v; want PointerOnly", outcome, err)
+	}
+	var rawPtr string
+	_ = st.Pool.QueryRow(ctx, `SELECT status, raw_review_id FROM reviews WHERE id = $1`, revID).Scan(&status, &rawPtr)
+	if status != "analyzed" || rawPtr != rawV3 {
+		t.Errorf("status = %s (want analyzed), raw_ptr updated = %v", status, rawPtr == rawV3)
+	}
+
+	// 軟刪除後的新版本 → Deleted：不復活、不改內容
+	mustExec(t, st, `UPDATE reviews SET deleted_at = now(), deleted_by = 'test' WHERE id = $1`, revID)
+	rawV4 := mkRaw("h4", "刪除後的更新")
+	_, outcome, err = st.UpsertReview(ctx, params(rawV4, "刪除後的更新"))
+	if err != nil || outcome != UpsertDeleted {
+		t.Fatalf("deleted = %v, %v; want Deleted", outcome, err)
+	}
+	_ = st.Pool.QueryRow(ctx, `SELECT content FROM reviews WHERE id = $1`, revID).Scan(&content)
+	if content != "難吃，吃完中毒" {
+		t.Errorf("soft-deleted review must not be resurrected, content = %q", content)
+	}
+
+	_ = st.FinishJob(ctx, jobID, "succeeded", nil, JobStats{}, "")
+}
+
+func TestIntegrationGetRawForIngest(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	src := fmt.Sprintf("test_gri_%d", time.Now().UnixNano())
+	mustExec(t, st, `
+		INSERT INTO sources (name, adapter, config, enabled, created_by, updated_by)
+		VALUES ($1, 'google_review', '{}', false, 'test:store-integration', 'test:store-integration')`, src)
+
+	res, err := st.InsertRawReviews(ctx, []adapter.RawReview{{
+		SourceName: src, ExternalID: "gri-1",
+		Payload: json.RawMessage(`{"comment": "x"}`), ContentHash: "h",
+		SourceURL: "https://x/1", LocationID: "locations/gri",
+		FetchedAt: time.Now().UTC(),
+	}}, "") // 推送型：無 crawl job
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := st.GetRawForIngest(ctx, res[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if raw.Adapter != "google_review" || raw.ExternalID != "gri-1" ||
+		raw.SourceURL != "https://x/1" || raw.LocationID != "locations/gri" {
+		t.Errorf("raw = %+v", raw)
+	}
+}
+
+// 對帳掃描查詢：只抓「最新版本未反映」的 raw；已反映與舊版本都不出現
+func TestIntegrationFindUnreflectedRaws(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	src := fmt.Sprintf("test_rec_%d", time.Now().UnixNano())
+	mustExec(t, st, `
+		INSERT INTO sources (name, adapter, config, enabled, created_by, updated_by)
+		VALUES ($1, 'google_review', '{}', false, 'test:store-integration', 'test:store-integration')`, src)
+
+	mkRaw := func(ext, hash string) string {
+		res, err := st.InsertRawReviews(ctx, []adapter.RawReview{{
+			SourceName: src, ExternalID: ext,
+			Payload: json.RawMessage(`{"comment": "x"}`), ContentHash: hash,
+			SourceURL: "https://x", FetchedAt: time.Now().UTC(),
+		}}, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res[0].ID
+	}
+	contains := func(ids []string, id string) bool {
+		for _, v := range ids {
+			if v == id {
+				return true
+			}
+		}
+		return false
+	}
+
+	// 未 ingest 的 raw → 要被掃到（olderThan=0 讓測試不用等）
+	rawV1 := mkRaw("rec-1", "h1")
+	ids, err := st.FindUnreflectedRaws(ctx, 0, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(ids, rawV1) {
+		t.Fatal("un-ingested raw must be found by reconciliation")
+	}
+
+	// ingest 之後 → 消失
+	rating := 1.0
+	if _, _, err := st.UpsertReview(ctx, UpsertReviewParams{
+		RawReviewID: rawV1, SourceName: src, ExternalID: "rec-1",
+		Rating: &rating, Content: "x", SourceURL: "https://x",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ids, _ = st.FindUnreflectedRaws(ctx, 0, 1000)
+	if contains(ids, rawV1) {
+		t.Fatal("reflected raw must not be re-flagged")
+	}
+
+	// 新版本出現但 reviews 還指向舊版 → 新版本被掃到、舊版本不出現
+	rawV2 := mkRaw("rec-1", "h2")
+	ids, _ = st.FindUnreflectedRaws(ctx, 0, 1000)
+	if !contains(ids, rawV2) {
+		t.Fatal("latest unreflected version must be found")
+	}
+	if contains(ids, rawV1) {
+		t.Fatal("older version must never be flagged")
+	}
+
+	// 隔離後 → 掃描排除（毒藥 raw 不進無限迴圈）
+	if err := st.QuarantineRaw(ctx, rawV2, "test: bad payload"); err != nil {
+		t.Fatal(err)
+	}
+	ids, _ = st.FindUnreflectedRaws(ctx, 0, 1000)
+	if contains(ids, rawV2) {
+		t.Fatal("quarantined raw must be excluded from reconciliation")
+	}
+}
+
+// 對帳第二條腿：status='new' 的 reviews 可被撈出重發事件；非 new 不出現
+func TestIntegrationFindStaleNewReviews(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	src := fmt.Sprintf("test_stale_%d", time.Now().UnixNano())
+	mustExec(t, st, `
+		INSERT INTO sources (name, adapter, config, enabled, created_by, updated_by)
+		VALUES ($1, 'google_review', '{}', false, 'test:store-integration', 'test:store-integration')`, src)
+
+	res, err := st.InsertRawReviews(ctx, []adapter.RawReview{{
+		SourceName: src, ExternalID: "st-1",
+		Payload: json.RawMessage(`{"comment": "x"}`), ContentHash: "h",
+		SourceURL: "https://x", FetchedAt: time.Now().UTC(),
+	}}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rating := 1.0
+	revID, _, err := st.UpsertReview(ctx, UpsertReviewParams{
+		RawReviewID: res[0].ID, SourceName: src, ExternalID: "st-1",
+		Rating: &rating, Content: "x", SourceURL: "https://x",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	contains := func(ids []string, id string) bool {
+		for _, v := range ids {
+			if v == id {
+				return true
+			}
+		}
+		return false
+	}
+	ids, err := st.FindStaleNewReviews(ctx, 0, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(ids, revID) {
+		t.Fatal("status=new review must be found for republish")
+	}
+	mustExec(t, st, `UPDATE reviews SET status = 'analyzed' WHERE id = $1`, revID)
+	ids, _ = st.FindStaleNewReviews(ctx, 0, 1000)
+	if contains(ids, revID) {
+		t.Fatal("analyzed review must not be republished")
+	}
+}
+
+func TestIntegrationEnabledWebhookSource(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+
+	secret, found, err := st.EnabledWebhookSource(ctx, "webhook_generic")
+	if err != nil || !found {
+		t.Fatalf("webhook_generic = found:%v, %v", found, err)
+	}
+	if secret != "dev_webhook_secret" {
+		t.Errorf("secret = %q", secret)
+	}
+	_, found, err = st.EnabledWebhookSource(ctx, "no_such_source")
+	if err != nil || found {
+		t.Fatalf("unknown source must not be found, got %v, %v", found, err)
+	}
 }
 
 func mustExec(t *testing.T, st *Store, sql string, args ...any) {

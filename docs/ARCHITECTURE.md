@@ -88,31 +88,36 @@ flowchart LR
 ```go
 type SourceAdapter interface {
     Name() string                    // "google_review", "facebook", ...
-    Fetch(ctx context.Context, job CrawlJob) ([]RawReview, *Cursor, error)
+    Fetch(ctx context.Context, job CrawlJob) (*FetchResult, error)
+}
+
+// FetchResult 除了資料本身，也回報抓取品質訊號（截斷不靜默）
+type FetchResult struct {
+    Reviews    []RawReview
+    Cursor     Cursor // 增量游標（單一 location）
+    PageCapHit bool   // 命中分頁安全上限，尾端可能有未抓資料
 }
 
 // 支援回覆的來源額外實作此介面（能力用 type assertion 偵測）
 type ReplyCapable interface {
-    Reply(ctx context.Context, req ReplyRequest) (*ReplyResult, error)
+    Reply(ctx context.Context, cfg json.RawMessage, req ReplyRequest) (*ReplyResult, error)
 }
 
 type RawReview struct {
     SourceName  string
-    ExternalID  string          // 來源平台的原始 ID，用於去重
+    ExternalID  string          // 來源平台的原始 ID，去重/版本化鍵
     Payload     json.RawMessage // 原始回應，一字不改
+    ContentHash string          // 版本鍵：內容變更 = 新版本
+    SourceURL   string          // 該店評論頁 deep link（adapter 以 place_id 組出）
+    LocationID  string          // 門市歸屬（→ stores）
     FetchedAt   time.Time
-    SourceURL   string          // 該則留言的 permalink，直接連回原始頁面
 }
 
 type ReplyRequest struct {
     ExternalID     string // 要回覆的留言在平台上的 ID
+    LocationID     string // 已知歸屬時直接指定，不掃描
     Content        string
     IdempotencyKey string // 防止重複發文
-}
-
-type ReplyResult struct {
-    ExternalReplyID string // 平台回傳的回覆 ID
-    ReplyURL        string // 回覆本身的 permalink（若平台提供）
 }
 ```
 
@@ -129,7 +134,7 @@ type ReplyResult struct {
 
 - **任務粒度 = source × location**：500 家連鎖 = 500 個可平行小任務，worker 才能真正分食；單一門市慢/壞只影響自己。
 - **工作分配**：靠 MQ consumer group 天然分配，worker 不需互相知道彼此。
-- **版本化去重**：`(source_name, external_id, content_hash)` 唯一鍵——相同內容重抓冪等跳過；**顧客編輯過的評論（如 3 星改 1 星）content_hash 改變，成為新版本列**，append-only 不變、升級性編輯不丟失。M3 歸一化取「同 external_id 最新版本」。
+- **版本化 + 連續去重**：**只有與「最新版本」內容相同才冪等跳過**（app 層在 advisory lock 下比對）——顧客編輯（3 星改 1 星）是新版本，**回改（A→B→A）也是新版本**，append-only 不變、任何編輯史都不丟失。M3 歸一化取「同 external_id 最新版本」，且只在**正規化內容真的變了**才重觸發分析（商家回覆造成的 payload 變動不算）。
 - **孤兒任務回收（reaper）**：worker 崩潰卡 `running`、或派工後 publish 失敗留下孤兒 `pending`，都會讓來源靜默停擺——scheduler leader 每輪 tick 把超時任務改 `failed`，下一輪 cron 自然重排（重抓冪等）。
 - **事件不丟失**：`review.raw` publish 失敗 = 任務失敗觸發重試；重試時既有版本列也補發事件（M3 以 raw_review_id 冪等）。
 - **防腦裂**：leader 每 tick 在 advisory lock 連線上心跳，PG 斷線即退位重新競選，避免雙 leader 重複派工燒 API 配額。
@@ -215,6 +220,8 @@ reply.result             Reply Worker → Backend（更新回覆狀態）
 2. 建立 `case_assignments`（可多人：高風險 = 客服 + 公關）。
 3. 發通知：PoC 先做 **Email + LINE Messaging API push**（注意：LINE Notify 已於 2025-03-31 停止服務，須用官方帳號 + Messaging API，有訊息配額成本），每則通知落 `notifications` 表（狀態：pending/sent/failed，含重試）。
 4. **SLA 倒數**：Routing Engine 內建 ticker 掃描 `sla_due_at` 將到期/已逾期的案件，發提醒事件（為 Phase 4 的 SLA 管控預留，PoC 只做提醒不做升級）。
+
+> **M5 必解的 reopen 語意**（M3 審查發現）：評論被顧客升級性編輯後 `status` 會重回 `new` 並重新分析，但 `cases.review_id` 目前是 UNIQUE——已結案的評論再惡化時，M5 必須定義是 reopen 既有案件還是撤銷 UNIQUE 允許多案件（含歷史案件關聯）。二擇一，不能留白。
 
 ---
 
@@ -318,7 +325,8 @@ erDiagram
 | `sources` | name, adapter, config(jsonb), capabilities(jsonb), schedule_cron, enabled | 來源設定 + 能力宣告（can_reply 等），新增來源不改程式 |
 | `crawl_jobs` | source_id, **location_id**, status, cursor_state(jsonb), worker_id, started_at, finished_at, error, stats(jsonb) | 每次抓取任務全記錄 — 爬蟲側稽核；粒度 = source × location，stats 含 page_cap_hit 截斷標記 |
 | `stores` | name, google_location_id(UNIQUE), google_place_id | location→門市對映；分流指派、收件匣篩選、source_url deep link 都靠它 |
-| `raw_reviews` | source_name, external_id, payload(jsonb), content_hash, source_url, location_id, fetched_at, crawl_job_id | **append-only 原始資料**，UNIQUE(source_name, external_id, **content_hash**)——編輯 = 新版本列 |
+| `raw_reviews` | source_name, external_id, payload(jsonb), content_hash, source_url, location_id, fetched_at, crawl_job_id | **append-only 原始資料**，連續去重（app 層）——編輯與回改都是新版本列 |
+| `ingest_quarantine` | raw_review_id(PK), reason | normalize 失敗的毒藥 raw 隔離區；人工修復後刪列即重入對帳掃描 |
 | `reviews` | raw_review_id, author, rating, content, posted_at, store_id, status, **source_url** | 正規化統一格式；source_url = 該則留言 permalink，一鍵跳回原頁 |
 | `analysis_results` | review_id, sentiment, sentiment_score, categories, keywords, risk_level, model_name, model_version, prompt_version, raw_response, is_current | AI 判斷 + 完整模型溯源，允許多版本 |
 | `cases` | review_id, risk_level, rule_id, status, sla_due_at, responded_at | 案件主體 |
@@ -392,6 +400,8 @@ poc-wachen/
 ```
 
 **PoC 部署**：`docker-compose` 起 PostgreSQL 16、NATS JetStream、各 Go/Python 服務。分散式能力以「同一 worker 服務跑 2+ replicas」驗證。正式環境路徑：K8s + HPA（依佇列深度擴縮）。
+
+**網路邊界**：服務間一律走內部網路（NATS 事件 + PostgreSQL），**不對外暴露任何 port**（Adminer 為本機 debug UI 例外）。正式環境唯一需要 ingress 的是 **Webhook Gateway**（接收外部系統推送）。服務間沒有同步 RPC——不需要 gRPC，事件驅動見 §1 設計原則。
 
 **可觀測性（PoC 最低限度）**：結構化日誌（zerolog / structlog）全鏈路帶 `request_id`；每個 stage 落 DB 的時間戳即可拉出「收集→分析→分流」端到端延遲。
 

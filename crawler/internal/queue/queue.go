@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -82,25 +83,38 @@ func (q *Queue) PublishReviewRaw(ctx context.Context, sourceName, rawReviewID st
 	return err
 }
 
-// JobHandler 回傳 (retryable, err)：err=nil → Ack；retryable=false 或達重試上限 → Term
-type JobHandler func(ctx context.Context, jobID string, attempt uint64, isFinal bool) error
+type ReviewCreatedMsg struct {
+	ReviewID string `json:"review_id"`
+}
 
-// ConsumeCrawlJobs 以 durable consumer 分散消費（多 worker 共享同一 consumer）
-func (q *Queue) ConsumeCrawlJobs(ctx context.Context, handler JobHandler) (jetstream.ConsumeContext, error) {
-	cons, err := q.JS.CreateOrUpdateConsumer(ctx, StreamCrawl, jetstream.ConsumerConfig{
-		Durable:       "crawl-workers",
-		FilterSubject: "crawl.jobs.>",
-		AckPolicy:     jetstream.AckExplicitPolicy,
-		AckWait:       2 * time.Minute,
-		MaxDeliver:    MaxDeliver,
-	})
+func (q *Queue) PublishReviewCreated(ctx context.Context, reviewID string) error {
+	data, _ := json.Marshal(ReviewCreatedMsg{ReviewID: reviewID})
+	_, err := q.JS.Publish(ctx, "review.created", data)
+	return err
+}
+
+// Handler：err=nil → Ack；錯誤 → 線性退避重試；達 MaxDeliver → Term。
+// id 為訊息 payload 內的業務鍵（job_id / raw_review_id）。
+type Handler func(ctx context.Context, id string, attempt uint64, isFinal bool) error
+
+// consume 是兩個 durable consumer 的共用骨架：
+// unmarshal → 讀投遞次數 → handler → ack / 退避 nak / term
+func (q *Queue) consume(ctx context.Context, stream string, cfg jetstream.ConsumerConfig,
+	extractID func([]byte) (string, error), nakBase time.Duration, handler Handler) (jetstream.ConsumeContext, error) {
+
+	cfg.AckPolicy = jetstream.AckExplicitPolicy
+	cfg.MaxDeliver = MaxDeliver
+	cons, err := q.JS.CreateOrUpdateConsumer(ctx, stream, cfg)
 	if err != nil {
-		return nil, fmt.Errorf("ensure consumer: %w", err)
+		return nil, fmt.Errorf("ensure consumer %s/%s: %w", stream, cfg.Durable, err)
 	}
 	return cons.Consume(func(msg jetstream.Msg) {
-		var m CrawlJobMsg
-		if err := json.Unmarshal(msg.Data(), &m); err != nil {
-			_ = msg.Term() // 格式錯誤沒有重試的意義
+		id, err := extractID(msg.Data())
+		if err != nil {
+			// 格式錯誤沒有重試的意義，但不能無聲消失
+			slog.Default().Error("dropping malformed message",
+				"stream", stream, "durable", cfg.Durable, "err", err)
+			_ = msg.Term()
 			return
 		}
 		attempt := uint64(1)
@@ -108,16 +122,42 @@ func (q *Queue) ConsumeCrawlJobs(ctx context.Context, handler JobHandler) (jetst
 			attempt = meta.NumDelivered
 		}
 		isFinal := attempt >= MaxDeliver
-		if err := handler(ctx, m.JobID, attempt, isFinal); err != nil {
+		if err := handler(ctx, id, attempt, isFinal); err != nil {
 			if isFinal {
 				_ = msg.Term()
 			} else {
-				_ = msg.NakWithDelay(time.Duration(attempt) * 10 * time.Second) // 退避重試
+				_ = msg.NakWithDelay(time.Duration(attempt) * nakBase)
 			}
 			return
 		}
 		_ = msg.Ack()
 	})
+}
+
+// ConsumeCrawlJobs 以 durable consumer 分散消費（多 worker 共享同一 consumer）
+func (q *Queue) ConsumeCrawlJobs(ctx context.Context, handler Handler) (jetstream.ConsumeContext, error) {
+	return q.consume(ctx, StreamCrawl, jetstream.ConsumerConfig{
+		Durable:       "crawl-workers",
+		FilterSubject: "crawl.jobs.>",
+		AckWait:       2 * time.Minute,
+	}, func(data []byte) (string, error) {
+		var m CrawlJobMsg
+		err := json.Unmarshal(data, &m)
+		return m.JobID, err
+	}, 10*time.Second, handler)
+}
+
+// ConsumeReviewRaw 供 Ingestion 以 durable consumer 消費 review.raw
+func (q *Queue) ConsumeReviewRaw(ctx context.Context, handler Handler) (jetstream.ConsumeContext, error) {
+	return q.consume(ctx, StreamReviews, jetstream.ConsumerConfig{
+		Durable:       "ingestion",
+		FilterSubject: "review.raw",
+		AckWait:       time.Minute,
+	}, func(data []byte) (string, error) {
+		var m ReviewRawMsg
+		err := json.Unmarshal(data, &m)
+		return m.RawReviewID, err
+	}, 5*time.Second, handler)
 }
 
 func (q *Queue) Close() { q.nc.Close() }

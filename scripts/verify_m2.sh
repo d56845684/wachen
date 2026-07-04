@@ -1,32 +1,9 @@
 #!/usr/bin/env bash
 # M2 驗收：分散式抓取、版本化去重、增量 cursor、source_url、負評過濾、稽核
 set -uo pipefail
+source "$(dirname "$0")/lib.sh"
 
-COMPOSE="docker compose -f deploy/docker-compose.yml"
-PSQL="$COMPOSE exec -T postgres psql -U wachen -d wachen -qtA -c"
 
-pass=0
-fail=0
-check() {
-    local desc="$1" expected="$2" actual="$3"
-    if [ "$expected" = "$actual" ]; then
-        echo "  PASS: $desc"
-        pass=$((pass+1))
-    else
-        echo "  FAIL: $desc (expected=$expected, actual=$actual)"
-        fail=$((fail+1))
-    fi
-}
-check_ge() {
-    local desc="$1" min="$2" actual="$3"
-    if [ "${actual:-0}" -ge "$min" ] 2>/dev/null; then
-        echo "  PASS: $desc (actual=$actual)"
-        pass=$((pass+1))
-    else
-        echo "  FAIL: $desc (expected>=$min, actual=$actual)"
-        fail=$((fail+1))
-    fi
-}
 
 echo "== 等待管線運轉（scheduler 每 10s 派工、mock 每 20s 產生事件、約 1/3 是編輯）=="
 deadline=$((SECONDS + 240))
@@ -80,8 +57,15 @@ versions=$($PSQL "
         GROUP BY source_name, external_id HAVING count(*) >= 2) v")
 check_ge "編輯過的評論產生多版本列（T1-A 端到端）" 1 "$versions"
 
-dups=$($PSQL "SELECT count(*) FROM (SELECT source_name, external_id, content_hash FROM raw_reviews GROUP BY 1,2,3 HAVING count(*) > 1) d")
-check "無重複 (source, external_id, content_hash)" "0" "$dups"
+# 連續去重的不變量：相鄰版本不得同內容（非相鄰同內容 = 回改，合法）
+dups=$($PSQL "
+    SELECT count(*) FROM (
+        SELECT content_hash,
+               lag(content_hash) OVER (PARTITION BY source_name, external_id
+                                       ORDER BY created_at, id) AS prev
+        FROM raw_reviews WHERE source_name LIKE 'google_review_mock%'
+    ) t WHERE content_hash = prev")
+check "無相鄰重複版本（連續去重生效）" "0" "$dups"
 
 cursor_set=$($PSQL "
     SELECT count(*) FROM crawl_jobs
@@ -92,7 +76,7 @@ cap_hits=$($PSQL "SELECT count(*) FROM crawl_jobs WHERE stats->>'page_cap_hit' =
 check "無首次同步截斷（page_cap_hit）" "0" "$cap_hits"
 
 echo "== 4. 事件發佈（review.raw → 供 M3 消費）=="
-msgs=$(curl -s "http://localhost:8222/jsz?streams=true" | python3 -c "
+msgs=$($COMPOSE exec -T nats wget -qO- "http://localhost:8222/jsz?streams=true" | python3 -c "
 import json,sys
 d = json.load(sys.stdin)
 for acc in d.get('account_details', []):
@@ -112,7 +96,4 @@ forge=$($COMPOSE exec -T postgres psql "postgres://app_user:app_dev_password@loc
     -c "INSERT INTO audit_logs (table_name, record_id, action, changed_by) VALUES ('x','x','INSERT','forged')" 2>&1 | grep -c "permission denied")
 check "app_user 無法直接偽造 audit_logs" "1" "$forge"
 
-echo ""
-echo "===================="
-echo "結果: $pass PASS / $fail FAIL"
-[ "$fail" -eq 0 ] && echo "M2 驗收通過 ✓" || { echo "M2 驗收未通過 ✗"; exit 1; }
+finish "M2"

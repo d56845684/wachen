@@ -33,9 +33,10 @@ migrate-down:  ## 回退一版 migration
 psql:          ## 進入 psql
 	$(COMPOSE) exec postgres psql -U wachen -d wachen
 
-nats-check:    ## 檢查 NATS JetStream 狀態
-	curl -s http://localhost:8222/jsz | head -20
+nats-check:    ## 檢查 NATS JetStream 狀態（port 不對外，容器內查）
+	$(COMPOSE) exec -T nats wget -qO- http://localhost:8222/jsz
 
-verify:        ## 全部驗收：M1（audit/append-only）+ M2（分散式抓取/版本化）
+verify:        ## 全部驗收：M1（audit）+ M2（分散式抓取）+ M3（ingestion/webhook）
 	bash scripts/verify_m1.sh
 	bash scripts/verify_m2.sh
+	bash scripts/verify_m3.sh
