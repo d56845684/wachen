@@ -1,0 +1,5 @@
+DROP TABLE IF EXISTS notifications;
+DROP TABLE IF EXISTS replies;
+DROP TABLE IF EXISTS case_assignments;
+DROP TABLE IF EXISTS cases;
+DROP TABLE IF EXISTS routing_rules;

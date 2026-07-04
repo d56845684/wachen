@@ -1,0 +1,55 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: wachen-postgres
+    environment:
+      POSTGRES_USER: wachen
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-wachen_dev}
+      POSTGRES_DB: wachen
+    ports:
+      - "5433:5432"   # 本機 5432 已有其他 PostgreSQL，對外用 5433
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wachen -d wachen"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    image: migrate/migrate:v4.17.1
+    container_name: wachen-migrate
+    volumes:
+      - ../migrations:/migrations:ro
+    command:
+      - "-path=/migrations"
+      - "-database=postgres://wachen:${POSTGRES_PASSWORD:-wachen_dev}@postgres:5432/wachen?sslmode=disable"
+      - "up"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  nats:
+    image: nats:2.10-alpine
+    container_name: wachen-nats
+    command: ["--jetstream", "--store_dir", "/data", "--http_port", "8222"]
+    ports:
+      - "4222:4222"   # client
+      - "8222:8222"   # monitoring
+    volumes:
+      - natsdata:/data
+
+  adminer:
+    image: adminer:4
+    container_name: wachen-adminer
+    ports:
+      - "8080:8080"
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  natsdata:

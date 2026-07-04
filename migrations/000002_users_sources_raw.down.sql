@@ -1,0 +1,4 @@
+DROP TABLE IF EXISTS raw_reviews;
+DROP TABLE IF EXISTS crawl_jobs;
+DROP TABLE IF EXISTS sources;
+DROP TABLE IF EXISTS users;
