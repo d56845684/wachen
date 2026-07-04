@@ -44,3 +44,11 @@
 - **Why:** 量產下 2 倍寫入放大零資訊增量。
 - **Cons:** M1 驗收語意「任何寫入都有 audit_logs」需要重新定義。
 - **Depends on:** 真實流量數據。
+
+## 7. Gemini 配額退避與成本控制
+
+- **What:** 429/quota 錯誤的專屬指數退避（目前吃通用 nak 線性退避）；每日 token/呼叫量上限與告警；歷史重跑的批次節流。
+- **Why:** 量產下編輯風暴或模型換版重跑會瞬間打爆免費層配額；退避不當浪費配額且拖慢管線。
+- **Pros:** 成本可預測、配額用在刀口上。 **Cons:** 需要用量統計基礎（可先從 analysis_results.latency_ms 與計數起步）。
+- **Context:** analyzer/worker.py 的 handle() 對所有錯誤一視同仁 nak(attempt*5s)；httpx.HTTPStatusError 可辨識 429。對帳兜底已存在（stale-new 15min）。
+- **Depends on:** 真實流量數據。

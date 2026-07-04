@@ -63,7 +63,9 @@ func main() {
 				return
 			case <-t.C:
 			}
-			reingested, republished, err := reconcileOnce(ctx, log, st, q, 2*time.Minute, 15*time.Minute, 100)
+			// 每輪上限刻意小（兩腿共用 20）：backlog 高峰時事件仍在佇列中排隊，
+			// 大量重發只會變成重複事件產生器（下游冪等吸收，但白燒 LLM 配額）
+			reingested, republished, err := reconcileOnce(ctx, log, st, q, 2*time.Minute, 15*time.Minute, 20)
 			if err != nil {
 				log.Error("reconciliation pass failed", "err", err)
 			} else if reingested > 0 || republished > 0 {

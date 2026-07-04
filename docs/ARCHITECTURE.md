@@ -170,14 +170,16 @@ reply.result             Reply Worker → Backend（更新回覆狀態）
 
 ### 4.1 架構
 
-- **Analysis Worker**：Python 常駐程序（非 HTTP 服務），直接消費 `review.created`，分析完寫 DB + 發 `review.analyzed`。可開多個 process/pod 水平擴展。
-- 另提供一支輕量 FastAPI `/analyze` 端點，供除錯與重跑單筆使用。
+- **Analysis Worker**：Python 常駐程序（uv 管理套件），消費 `review.created`，分析完寫 DB + 發 `review.analyzed`。可開多個 process/pod 水平擴展（durable consumer 分食）。
+- **LLM 供應商插件**：`GEMINI_API_KEY` 有值 → **Gemini**（generateContent + response_schema 結構化輸出，`GEMINI_MODEL` 可換型號）；未設定 → **heuristic** 確定性 fallback（字典比對），開發/CI 端到端可跑。切換供應商 = 換環境變數；input_hash 含模型版本，**新事件**即走新模型，歷史重跑需手動觸發（重發 review.created 或重設 status）。
+- **冪等與事件保證**（M3 的教訓直接沿用）：`input_hash = sha256(prompt_version|model|rating|content)`，相同輸入不重算但**仍補發 `review.analyzed`**（堵 publish-loss）；分析寫入有 **FOR UPDATE 版本圍欄**（分析期間被編輯 → 丟棄重讀，舊分析不可能蓋新內容）。兜底範圍誠實聲明：stale-new 掃描只救 `status='new'`，「commit 後 publish 前」的遺失窗口由 **M5 的 analyzed-未建案對帳** 負責（見 §5）。
+- 反諷測資（mock 8 則）是 heuristic 與 LLM 的對照 eval：關鍵字比對在「無星等的反諷」上必錯（已文件化為測試），語意理解的價值一翻兩瞪眼。
 
 ### 4.2 分析管線（對應截圖 ② 的四項能力）
 
 | 能力 | PoC 做法 |
 |---|---|
-| 情緒分析 | LLM（Claude API）單次呼叫產出結構化 JSON |
+| 情緒分析 | LLM（Gemini，`GEMINI_API_KEY`）單次呼叫產出結構化 JSON；無 key 時 heuristic fallback |
 | 類型分類 | 同上，分類集合：餐點品質/服務態度/出餐速度/環境清潔/價格感受/訂位外送系統問題/其他 |
 | 關鍵字辨識 | LLM 抽取 + 高風險關鍵字典（食安、中毒、過敏、提告、媒體…）雙保險 |
 | 嚴重度判斷 | LLM 評分 + 規則覆核：命中食安/公關/法律字典 → 強制 `high`，寧可誤升不可漏判 |
@@ -221,7 +223,10 @@ reply.result             Reply Worker → Backend（更新回覆狀態）
 3. 發通知：PoC 先做 **Email + LINE Messaging API push**（注意：LINE Notify 已於 2025-03-31 停止服務，須用官方帳號 + Messaging API，有訊息配額成本），每則通知落 `notifications` 表（狀態：pending/sent/failed，含重試）。
 4. **SLA 倒數**：Routing Engine 內建 ticker 掃描 `sla_due_at` 將到期/已逾期的案件，發提醒事件（為 Phase 4 的 SLA 管控預留，PoC 只做提醒不做升級）。
 
-> **M5 必解的 reopen 語意**（M3 審查發現）：評論被顧客升級性編輯後 `status` 會重回 `new` 並重新分析，但 `cases.review_id` 目前是 UNIQUE——已結案的評論再惡化時，M5 必須定義是 reopen 既有案件還是撤銷 UNIQUE 允許多案件（含歷史案件關聯）。二擇一，不能留白。
+> **M5 必解清單**（M3/M4 審查發現，入場前不能留白）：
+> 1. **reopen 語意**：升級性編輯 → `status='new'` 重新分析，但 `cases.review_id` 是 UNIQUE——已結案評論再惡化時，reopen 既有案件或撤銷 UNIQUE 允許多案件，二擇一。
+> 2. **事件只是提示**：`review.analyzed {review_id, analysis_id, risk_level}` 可能重複、可能過時（重放發的是現行值）——Routing 必須以 `review_id` 重讀 `is_current` 分析，以 `analysis_id` 冪等去重，**不得信任 payload 裡的 risk_level**。
+> 3. **analyzed-未建案對帳**：analyzer 在「commit 後、publish 前」死亡且重試耗盡時事件永久遺失，stale-new 掃描救不到（status 已非 new）——Routing 需要「status='analyzed' 且無 case」的定期補撈。
 
 ---
 

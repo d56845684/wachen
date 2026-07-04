@@ -1,0 +1,21 @@
+[project]
+name = "wachen-analyzer"
+version = "0.1.0"
+description = "顧客負評 AI 分析 worker：消費 review.created → LLM/heuristic 分析 → analysis_results + review.analyzed"
+requires-python = ">=3.12"
+dependencies = [
+    "nats-py==2.7.2",
+    "asyncpg==0.29.0",
+    "httpx==0.27.0",
+]
+
+[dependency-groups]
+dev = ["pytest==8.2.0"]
+
+[tool.uv]
+# 這是應用程式不是函式庫：uv sync 只裝依賴、不打包本身
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

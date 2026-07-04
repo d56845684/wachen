@@ -1,12 +1,14 @@
 # poc-wachen — 顧客負評追蹤系統 PoC
 
-架構文件：`docs/ARCHITECTURE.md`。Go 爬蟲（crawler/）+ Python 分析（analyzer/，M4）+ PostgreSQL（migrations/）+ NATS JetStream。
+架構文件：`docs/ARCHITECTURE.md`。Go 爬蟲+ingestion+webhook（crawler/）+ Python AI 分析（analyzer/，uv 管理）+ PostgreSQL（migrations/）+ NATS JetStream。LLM 供應商由 `GEMINI_API_KEY` 決定（未設定 → heuristic fallback）。
 
 ## Testing
 
-- 單元測試：`make test`（Docker 內跑 `go test ./...`，不需本機 Go）
+- Go 單元測試：`make test`（Docker 內跑，不需本機 Go）
+- Python 測試：`make test-python`（uv + pytest，Docker 內跑）
 - 整合測試：`make test-integration`（需先 `make up`，打 compose 裡的真 PG）
-- E2E 驗收：`make verify`（M1）、`bash scripts/verify_m2.sh`（M2）
+- E2E 驗收：`make verify`（M1-M4 全部，各腳本可單獨跑且可重複執行）
+- Python 套件管理用 uv（改 `analyzer/pyproject.toml` 後跑 `make uv-lock`）
 
 ## Skill routing
 

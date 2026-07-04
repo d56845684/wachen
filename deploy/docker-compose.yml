@@ -1,5 +1,6 @@
 services:
   postgres:
+    restart: unless-stopped
     image: postgres:16-alpine
     container_name: wachen-postgres
     environment:
@@ -29,6 +30,7 @@ services:
         condition: service_healthy
 
   nats:
+    restart: unless-stopped
     image: nats:2.10-alpine
     container_name: wachen-nats
     command: ["--jetstream", "--store_dir", "/data", "--http_port", "8222"]
@@ -37,6 +39,7 @@ services:
       - natsdata:/data
 
   mockgoogle:
+    restart: unless-stopped
     build: ../crawler
     image: wachen-crawler
     container_name: wachen-mockgoogle
@@ -48,6 +51,7 @@ services:
     # 僅供 worker 內部抓取，不對外
 
   scheduler:
+    restart: unless-stopped
     image: wachen-crawler
     container_name: wachen-scheduler
     command: ["/bin/scheduler"]
@@ -63,6 +67,7 @@ services:
         condition: service_started
 
   worker:
+    restart: unless-stopped
     image: wachen-crawler
     command: ["/bin/worker"]
     environment:
@@ -77,6 +82,7 @@ services:
       replicas: 2   # 分散式驗證：兩個 worker 分食任務；可用 --scale worker=N 再加
 
   ingestion:
+    restart: unless-stopped
     image: wachen-crawler
     container_name: wachen-ingestion
     command: ["/bin/ingestion"]
@@ -90,6 +96,7 @@ services:
         condition: service_started
 
   webhook:
+    restart: unless-stopped
     image: wachen-crawler
     container_name: wachen-webhook
     command: ["/bin/webhook"]
@@ -104,7 +111,25 @@ services:
       nats:
         condition: service_started
 
+  analyzer:
+    restart: unless-stopped
+    build: ../analyzer
+    image: wachen-analyzer
+    container_name: wachen-analyzer
+    environment:
+      DATABASE_URL: postgres://app_user:app_dev_password@postgres:5432/wachen
+      NATS_URL: nats://nats:4222
+      # LLM 供應商：GEMINI_API_KEY 有值 → Gemini；未設定 → heuristic fallback
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.0-flash}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_started
+
   adminer:
+    restart: unless-stopped
     image: adminer:4
     container_name: wachen-adminer
     ports:

@@ -6,6 +6,15 @@ test:          ## 單元測試（Docker 內跑，不需本機 Go）
 	docker run --rm -v $(PWD)/crawler:/src -v wachen-gomod:/go/pkg/mod -w /src \
 		golang:1.22-alpine sh -c "go mod tidy && go test ./..."
 
+test-python:   ## analyzer 測試（uv，Docker 內跑，不需本機 Python）
+	docker run --rm -v $(PWD)/analyzer:/app -v wachen-uv:/root/.cache/uv -w /app \
+		ghcr.io/astral-sh/uv:python3.12-bookworm-slim \
+		sh -c "uv sync --frozen && uv run pytest -q"
+
+uv-lock:       ## 重新產生 analyzer/uv.lock（改 pyproject.toml 後執行）
+	docker run --rm -v $(PWD)/analyzer:/app -v wachen-uv:/root/.cache/uv -w /app \
+		ghcr.io/astral-sh/uv:python3.12-bookworm-slim uv lock
+
 test-integration: ## store 整合測試（需先 make up，連 compose 網路打真 PG）
 	docker run --rm -v $(PWD)/crawler:/src -v wachen-gomod:/go/pkg/mod -w /src \
 		--network deploy_default \
@@ -36,7 +45,8 @@ psql:          ## 進入 psql
 nats-check:    ## 檢查 NATS JetStream 狀態（port 不對外，容器內查）
 	$(COMPOSE) exec -T nats wget -qO- http://localhost:8222/jsz
 
-verify:        ## 全部驗收：M1（audit）+ M2（分散式抓取）+ M3（ingestion/webhook）
+verify:        ## 全部驗收：M1（audit）+ M2（抓取）+ M3（ingestion）+ M4（AI 分析）
 	bash scripts/verify_m1.sh
 	bash scripts/verify_m2.sh
 	bash scripts/verify_m3.sh
+	bash scripts/verify_m4.sh
