@@ -1,7 +1,7 @@
 COMPOSE = docker compose -f deploy/docker-compose.yml
 
-# 非 mock 服務（正式/遠端用）：排除 mockgoogle / scheduler / worker（僅供 mock 排程爬取）
-PROD_SERVICES = postgres nats migrate ingestion webhook routing replier analyzer api web adminer
+# 正式/遠端服務：排除 mock 三件（mockgoogle/scheduler/worker）與 adminer（DB debug UI，不曝生產）
+PROD_SERVICES = postgres nats migrate ingestion webhook routing replier analyzer api web
 
 .PHONY: up up-prod down clean migrate migrate-down psql nats-check verify test test-integration crawl-wacheng
 
@@ -27,7 +27,7 @@ test-integration: ## store 整合測試（需先 make up，連 compose 網路打
 up:            ## 啟動全部服務（含 mock，開發用）
 	$(COMPOSE) up -d
 
-up-prod:       ## 只啟非 mock 服務（正式/遠端；migrate 會自動跑，資料已還原則 no-op）
+up-prod:       ## 只啟正式服務（排除 mock 三件 + adminer；migrate 自動跑，已還原則 no-op）
 	$(COMPOSE) up -d $(PROD_SERVICES)
 
 down:          ## 停止服務（保留資料）
