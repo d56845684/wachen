@@ -60,11 +60,24 @@ type CaseFilter struct {
 	Status string
 	Store  string // stores.google_location_id（未對映門市用特殊值 "__none__"）
 	Source string // reviews.source_name
+	Sort   string // sla（預設）/ newest / oldest（依評論張貼時間）
 	Limit  int
 }
 
-// ListCases：收件匣。排序：逾期優先 → SLA 逼近優先
+// orderClause：白名單映射，避免把使用者輸入拼進 SQL。
+// 評論時間排序把 NULL（無 posted_at 的來源）放最後。
+var orderClause = map[string]string{
+	"sla":    "(c.sla_due_at < now() AND c.status IN ('open','in_progress')) DESC, c.sla_due_at ASC",
+	"newest": "v.posted_at DESC NULLS LAST, c.created_at DESC",
+	"oldest": "v.posted_at ASC NULLS LAST, c.created_at ASC",
+}
+
+// ListCases：收件匣。預設排序：逾期優先 → SLA 逼近優先
 func (s *Store) ListCases(ctx context.Context, f CaseFilter) ([]CaseSummary, error) {
+	order, ok := orderClause[f.Sort]
+	if !ok {
+		order = orderClause["sla"]
+	}
 	rows, err := s.Pool.Query(ctx, `
 		SELECT c.id, c.risk_level, c.status, c.sla_due_at,
 		       c.sla_reminded_at IS NOT NULL, c.reopened_count, c.created_at,
@@ -81,8 +94,7 @@ func (s *Store) ListCases(ctx context.Context, f CaseFilter) ([]CaseSummary, err
 		  AND ($3 = '' OR st.google_location_id = $3 OR ($3 = '__none__' AND v.store_id IS NULL))
 		  AND ($4 = '' OR v.source_name = $4)
 		  AND v.source_name NOT LIKE 'test_%'
-		ORDER BY (c.sla_due_at < now() AND c.status IN ('open','in_progress')) DESC,
-		         c.sla_due_at ASC
+		ORDER BY `+order+`
 		LIMIT $5`, f.Risk, f.Status, f.Store, f.Source, f.Limit)
 	if err != nil {
 		return nil, err

@@ -83,6 +83,7 @@ export interface CaseFilters {
   status: string;
   store: string;
   source: string;
+  sort: string;
 }
 
 export interface RecentAnalysis {

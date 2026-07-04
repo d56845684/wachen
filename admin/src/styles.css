@@ -135,21 +135,53 @@ button { font-family: var(--sans); cursor: pointer; }
 
 /* ---------- 收件匣 ---------- */
 .page { max-width: 1040px; margin: 0 auto; padding: 24px 28px 80px; }
-.filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; }
-.chip {
-  padding: 5px 14px; border-radius: 999px; font-size: 13px;
-  border: 1px solid var(--line-strong); background: none; color: var(--muted);
+
+/* 篩選列：卡片式分組（風險 / 狀態 / 門市·來源·排序） */
+.filterbar {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 16px 18px;
+  margin-bottom: 20px;
+  display: flex; flex-direction: column; gap: 14px;
+  box-shadow: 0 8px 24px #0004;
 }
+.fb-group { display: flex; align-items: center; gap: 14px; }
+.fb-label {
+  font-size: 11px; letter-spacing: 3px; color: var(--faint);
+  min-width: 34px; flex: none;
+}
+.chips { display: flex; gap: 7px; flex-wrap: wrap; }
+.chip {
+  padding: 5px 15px; border-radius: 999px; font-size: 13px;
+  border: 1px solid var(--line-strong); background: var(--ink-2); color: var(--muted);
+  transition: all 0.12s;
+}
+.chip:hover { color: var(--text); border-color: var(--muted); }
 .chip.on { background: var(--paper); color: #26221a; border-color: var(--paper); font-weight: 700; }
-.chip.clear { color: var(--vermilion); border-color: var(--vermilion); }
-.filters .sep { width: 1px; background: var(--line-strong); margin: 4px 6px; }
+.chip.clear { background: none; color: var(--vermilion); border-color: var(--vermilion); }
+.chip.clear:hover { background: var(--vermilion-dim); }
+
+.fb-row {
+  display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap;
+  border-top: 1px solid var(--line); padding-top: 14px;
+}
+.fb-field { display: flex; flex-direction: column; gap: 5px; }
+.fb-field .fb-label { min-width: 0; }
+.fb-spacer { flex: 1; }
+.fb-count {
+  color: var(--paper); font-family: var(--mono); font-size: 13px;
+  background: var(--ink-2); border: 1px solid var(--line-strong);
+  padding: 5px 12px; border-radius: 6px; align-self: center;
+}
 .select {
-  padding: 5px 12px; border-radius: 6px; font-size: 13px;
+  padding: 7px 12px; border-radius: 6px; font-size: 13px; min-width: 150px;
   background: var(--ink-2); color: var(--text);
   border: 1px solid var(--line-strong); font-family: var(--sans);
+  cursor: pointer;
 }
+.select:hover { border-color: var(--muted); }
 .select:focus { outline: none; border-color: var(--amber); }
-.filters .count { margin-left: auto; color: var(--faint); font-family: var(--mono); font-size: 12px; align-self: center; }
 
 .case-list { display: flex; flex-direction: column; gap: 10px; }
 .case-card {

@@ -17,7 +17,13 @@ const STATUSES = [
   ["closed", "已結案"],
 ] as const;
 
-const EMPTY: CaseFilters = { risk: "", status: "", store: "", source: "" };
+const SORTS = [
+  ["sla", "SLA 急迫優先"],
+  ["newest", "評論最新優先"],
+  ["oldest", "評論最舊優先"],
+] as const;
+
+const EMPTY: CaseFilters = { risk: "", status: "", store: "", source: "", sort: "sla" };
 
 export default function Inbox() {
   const nav = useNavigate();
@@ -46,47 +52,73 @@ export default function Inbox() {
   }, [filters]);
 
   const set = (patch: Partial<CaseFilters>) => setFilters((f) => ({ ...f, ...patch }));
-  const active = filters.risk || filters.status || filters.store || filters.source;
+  const active =
+    filters.risk || filters.status || filters.store || filters.source || filters.sort !== "sla";
 
   return (
     <div className="page">
-      <div className="filters">
-        {RISKS.map(([v, label]) => (
-          <button key={v} className={`chip${filters.risk === v ? " on" : ""}`} onClick={() => set({ risk: v })}>
-            {label}
-          </button>
-        ))}
-        <div className="sep" />
-        {STATUSES.map(([v, label]) => (
-          <button key={v} className={`chip${filters.status === v ? " on" : ""}`} onClick={() => set({ status: v })}>
-            {label}
-          </button>
-        ))}
-      </div>
+      <div className="filterbar">
+        <div className="fb-group">
+          <span className="fb-label">風險</span>
+          <div className="chips">
+            {RISKS.map(([v, label]) => (
+              <button key={v} className={`chip${filters.risk === v ? " on" : ""}`} onClick={() => set({ risk: v })}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
 
-      <div className="filters">
-        <select className="select" value={filters.store} onChange={(e) => set({ store: e.target.value })}>
-          <option value="">全部門市</option>
-          {stores.map((s) => (
-            <option key={s.value} value={s.value}>
-              {s.label}（{s.count}）
-            </option>
-          ))}
-        </select>
-        <select className="select" value={filters.source} onChange={(e) => set({ source: e.target.value })}>
-          <option value="">全部來源</option>
-          {sources.map((s) => (
-            <option key={s.value} value={s.value}>
-              {s.label}（{s.count}）
-            </option>
-          ))}
-        </select>
-        {active && (
-          <button className="chip clear" onClick={() => setFilters(EMPTY)}>
-            清除篩選 ✕
-          </button>
-        )}
-        {cases && <span className="count">{cases.length} 件</span>}
+        <div className="fb-group">
+          <span className="fb-label">狀態</span>
+          <div className="chips">
+            {STATUSES.map(([v, label]) => (
+              <button key={v} className={`chip${filters.status === v ? " on" : ""}`} onClick={() => set({ status: v })}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="fb-row">
+          <label className="fb-field">
+            <span className="fb-label">門市</span>
+            <select className="select" value={filters.store} onChange={(e) => set({ store: e.target.value })}>
+              <option value="">全部門市</option>
+              {stores.map((s) => (
+                <option key={s.value} value={s.value}>
+                  {s.label}（{s.count}）
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="fb-field">
+            <span className="fb-label">來源</span>
+            <select className="select" value={filters.source} onChange={(e) => set({ source: e.target.value })}>
+              <option value="">全部來源</option>
+              {sources.map((s) => (
+                <option key={s.value} value={s.value}>
+                  {s.label}（{s.count}）
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="fb-field">
+            <span className="fb-label">排序</span>
+            <select className="select" value={filters.sort} onChange={(e) => set({ sort: e.target.value })}>
+              {SORTS.map(([v, label]) => (
+                <option key={v} value={v}>{label}</option>
+              ))}
+            </select>
+          </label>
+          <div className="fb-spacer" />
+          {active && (
+            <button className="chip clear" onClick={() => setFilters(EMPTY)}>
+              清除篩選 ✕
+            </button>
+          )}
+          {cases && <span className="fb-count">{cases.length} 件</span>}
+        </div>
       </div>
 
       {cases === null ? (

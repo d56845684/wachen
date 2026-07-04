@@ -174,7 +174,8 @@ def main():
             f.write(
                 f"INSERT INTO stores (name, google_location_id, google_place_id) "
                 f"VALUES ('{name}', '{p['id']}', '{p['id']}') "
-                f"ON CONFLICT (google_location_id) DO UPDATE SET name = EXCLUDED.name;\n")
+                f"ON CONFLICT (google_location_id) DO UPDATE SET name = EXCLUDED.name "
+                f"WHERE stores.name IS DISTINCT FROM EXCLUDED.name;\n")
     print(f"stores SQL 已寫入 {sql_path}（{len(stores)} 家）")
 
     print(f"== 2/3 抓評論（{len(stores)} 家，官方上限每家 5 則）==")

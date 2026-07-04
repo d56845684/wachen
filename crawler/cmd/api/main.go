@@ -123,6 +123,7 @@ func (s *server) listCases(w http.ResponseWriter, r *http.Request) {
 		Status: q.Get("status"),
 		Store:  q.Get("store"),
 		Source: q.Get("source"),
+		Sort:   q.Get("sort"),
 		Limit:  200,
 	})
 	if err != nil {

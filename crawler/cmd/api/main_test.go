@@ -174,14 +174,14 @@ func TestListCasesPassesStoreAndSourceFilters(t *testing.T) {
 	_, out := doLogin(t, ts, "admin@example.com", "Wachen!2026")
 
 	resp := authedReq(t, http.MethodGet,
-		ts.URL+"/api/v1/cases?risk=high&status=open&store=locations/mock-loc-1&source=google_review_mock_a",
+		ts.URL+"/api/v1/cases?risk=high&status=open&store=locations/mock-loc-1&source=google_review_mock_a&sort=newest",
 		out["token"], "")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("list: %d", resp.StatusCode)
 	}
 	f := st.lastFilter
 	if f.Risk != "high" || f.Status != "open" ||
-		f.Store != "locations/mock-loc-1" || f.Source != "google_review_mock_a" {
+		f.Store != "locations/mock-loc-1" || f.Source != "google_review_mock_a" || f.Sort != "newest" {
 		t.Errorf("filter not fully passed through: %+v", f)
 	}
 }
