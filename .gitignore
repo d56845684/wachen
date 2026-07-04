@@ -19,3 +19,7 @@ __pycache__/
 node_modules/
 dist/
 .gstack/
+backups/
+scripts/.wacheng_stores.json
+scripts/wacheng_stores.generated.sql
+scripts/.debug_maps*.png

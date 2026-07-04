@@ -132,7 +132,10 @@ def push_review(webhook_url, secret, review, place):
         "rating": float(review.get("rating", 0)),
         "content": text,
         "posted_at": review.get("publishTime"),
-        "source_url": review.get("googleMapsUri") or place.get("googleMapsUri", ""),
+        # 用 review id 組單則評論永久連結（跳回該則，而非只到店家頁）；
+        # review["name"] = places/{pid}/reviews/{review_id}，取最後一段
+        "source_url": ("https://www.google.com/maps/reviews/data=!4m6!14m5!1m4!2m3!1s"
+                       + review["name"].rsplit("/", 1)[-1] + "!2m1!1s0x0:0x0?hl=zh-TW"),
         # 對映 stores.google_location_id → reviews.store_id，每家門市獨立
         "location_id": place.get("id", ""),
     }
