@@ -17,6 +17,21 @@ func TestOrderClauseWhitelist(t *testing.T) {
 	}
 }
 
+// 星等篩選：合法值原樣通過；未知/惡意/無此星等 → "" (= 全部，不進 ::numeric cast)
+func TestNormalizeRatingWhitelist(t *testing.T) {
+	for _, ok := range []string{"1", "2", "3", "4", "5"} {
+		if normalizeRating(ok) != ok {
+			t.Errorf("valid rating %q should pass through", ok)
+		}
+	}
+	// 空/非數字/注入/合法 numeric 但非整數星等/超界 → 一律降級為 ""
+	for _, bad := range []string{"", "abc", "4.5", "6", "0", "-1", "1);DROP TABLE cases", " 1"} {
+		if got := normalizeRating(bad); got != "" {
+			t.Errorf("bad rating %q should normalize to empty, got %q", bad, got)
+		}
+	}
+}
+
 func TestOrderClauseUsesPostedAtForTimeSorts(t *testing.T) {
 	if !contains(orderClause["newest"], "v.posted_at DESC") {
 		t.Error("newest must sort by posted_at desc")

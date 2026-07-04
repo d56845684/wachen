@@ -60,6 +60,7 @@ type CaseFilter struct {
 	Status string
 	Store  string // stores.google_location_id（未對映門市用特殊值 "__none__"）
 	Source string // reviews.source_name
+	Rating string // 星等精確篩選（"1"~"5"，空=全部）；僅對有星等的來源（Google）有意義
 	Sort   string // sla（預設）/ newest / oldest（依評論張貼時間）
 	Limit  int
 }
@@ -70,6 +71,19 @@ var orderClause = map[string]string{
 	"sla":    "(c.sla_due_at < now() AND c.status IN ('open','in_progress')) DESC, c.sla_due_at ASC",
 	"newest": "v.posted_at DESC NULLS LAST, c.created_at DESC",
 	"oldest": "v.posted_at ASC NULLS LAST, c.created_at ASC",
+}
+
+// validRatings：星等篩選白名單（Google 評論為整數星等 1-5）。
+var validRatings = map[string]bool{"1": true, "2": true, "3": true, "4": true, "5": true}
+
+// normalizeRating：對齊 orderClause 的降級策略——非白名單值（空字串、非數字、
+// 注入嘗試、無此星等如 4.5/6）一律當「全部」，不進查詢。避免 v.rating = $5::numeric
+// 對惡意輸入丟 cast error 變 500（其餘篩選對壞值都是回空，星等須一致）。
+func normalizeRating(r string) string {
+	if validRatings[r] {
+		return r
+	}
+	return ""
 }
 
 // ListCases：收件匣。預設排序：逾期優先 → SLA 逼近優先
@@ -93,9 +107,10 @@ func (s *Store) ListCases(ctx context.Context, f CaseFilter) ([]CaseSummary, err
 		  AND ($2 = '' OR c.status = $2)
 		  AND ($3 = '' OR st.google_location_id = $3 OR ($3 = '__none__' AND v.store_id IS NULL))
 		  AND ($4 = '' OR v.source_name = $4)
+		  AND ($5 = '' OR v.rating = $5::numeric)
 		  AND v.source_name NOT LIKE 'test_%'
 		ORDER BY `+order+`
-		LIMIT $5`, f.Risk, f.Status, f.Store, f.Source, f.Limit)
+		LIMIT $6`, f.Risk, f.Status, f.Store, f.Source, normalizeRating(f.Rating), f.Limit)
 	if err != nil {
 		return nil, err
 	}

@@ -23,7 +23,19 @@ const SORTS = [
   ["oldest", "評論最舊優先"],
 ] as const;
 
-const EMPTY: CaseFilters = { risk: "", status: "", store: "", source: "", sort: "sla" };
+const RATINGS = [
+  ["", "全部星等"],
+  ["5", "★★★★★"],
+  ["4", "★★★★"],
+  ["3", "★★★"],
+  ["2", "★★"],
+  ["1", "★"],
+] as const;
+
+const EMPTY: CaseFilters = { risk: "", status: "", store: "", source: "", rating: "", sort: "sla" };
+
+// 只有 Google 來源的評論有 1-5 星；webhook（官網/客服）來源沒有星等，故星等篩選只對 Google 開放
+const isGoogleSource = (source: string) => source.toLowerCase().includes("google");
 
 export default function Inbox() {
   const nav = useNavigate();
@@ -52,8 +64,11 @@ export default function Inbox() {
   }, [filters]);
 
   const set = (patch: Partial<CaseFilters>) => setFilters((f) => ({ ...f, ...patch }));
+  // 切換到非 Google 來源時清掉星等篩選，避免留下對該來源無意義的條件
+  const setSource = (source: string) =>
+    set({ source, rating: isGoogleSource(source) ? filters.rating : "" });
   const active =
-    filters.risk || filters.status || filters.store || filters.source || filters.sort !== "sla";
+    filters.risk || filters.status || filters.store || filters.source || filters.rating || filters.sort !== "sla";
 
   return (
     <div className="page">
@@ -94,7 +109,7 @@ export default function Inbox() {
           </label>
           <label className="fb-field">
             <span className="fb-label">來源</span>
-            <select className="select" value={filters.source} onChange={(e) => set({ source: e.target.value })}>
+            <select className="select" value={filters.source} onChange={(e) => setSource(e.target.value)}>
               <option value="">全部來源</option>
               {sources.map((s) => (
                 <option key={s.value} value={s.value}>
@@ -103,6 +118,16 @@ export default function Inbox() {
               ))}
             </select>
           </label>
+          {isGoogleSource(filters.source) && (
+            <label className="fb-field">
+              <span className="fb-label">星等</span>
+              <select className="select" value={filters.rating} onChange={(e) => set({ rating: e.target.value })}>
+                {RATINGS.map(([v, label]) => (
+                  <option key={v} value={v}>{label}</option>
+                ))}
+              </select>
+            </label>
+          )}
           <label className="fb-field">
             <span className="fb-label">排序</span>
             <select className="select" value={filters.sort} onChange={(e) => set({ sort: e.target.value })}>

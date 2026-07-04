@@ -107,6 +107,7 @@ export interface CaseFilters {
   status: string;
   store: string;
   source: string;
+  rating: string; // 星等篩選（"1"~"5"，空=全部）；僅 Google 來源可選
   sort: string;
 }
 
