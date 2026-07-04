@@ -194,7 +194,7 @@ services:
     container_name: wachen-web
     mem_limit: 64m
     ports:
-      - "8088:80"   # 後台唯一對外入口（nginx：靜態 SPA + /api 代理）
+      - "127.0.0.1:8088:80"   # 只綁 loopback：對外走 make tunnel（cloudflared 打 localhost），避免公網直連（Docker 發佈的 port 不受 ufw 管）
     depends_on:
       api:
         condition: service_started
@@ -205,7 +205,7 @@ services:
     container_name: wachen-adminer
     mem_limit: 128m
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"   # DB debug UI 只給本機，不對外
     environment:
       ADMINER_DEFAULT_SERVER: postgres
     depends_on:
