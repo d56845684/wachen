@@ -45,8 +45,9 @@ psql:          ## 進入 psql
 nats-check:    ## 檢查 NATS JetStream 狀態（port 不對外，容器內查）
 	$(COMPOSE) exec -T nats wget -qO- http://localhost:8222/jsz
 
-verify:        ## 全部驗收：M1（audit）+ M2（抓取）+ M3（ingestion）+ M4（AI 分析）
+verify:        ## 全部驗收：M1 audit + M2 抓取 + M3 ingestion + M4 AI + M5 分流
 	bash scripts/verify_m1.sh
 	bash scripts/verify_m2.sh
 	bash scripts/verify_m3.sh
 	bash scripts/verify_m4.sh
+	bash scripts/verify_m5.sh

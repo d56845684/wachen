@@ -111,6 +111,21 @@ services:
       nats:
         condition: service_started
 
+  routing:
+    restart: unless-stopped
+    image: wachen-crawler
+    container_name: wachen-routing
+    command: ["/bin/routing"]
+    environment:
+      DATABASE_URL: postgres://app_user:app_dev_password@postgres:5432/wachen?sslmode=disable
+      NATS_URL: nats://nats:4222
+      NOTIFY_MODE: log   # PoC 模擬送出；M-real 換 smtp / line
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_started
+
   analyzer:
     restart: unless-stopped
     build: ../analyzer

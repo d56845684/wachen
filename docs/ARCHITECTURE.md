@@ -223,10 +223,16 @@ reply.result             Reply Worker → Backend（更新回覆狀態）
 3. 發通知：PoC 先做 **Email + LINE Messaging API push**（注意：LINE Notify 已於 2025-03-31 停止服務，須用官方帳號 + Messaging API，有訊息配額成本），每則通知落 `notifications` 表（狀態：pending/sent/failed，含重試）。
 4. **SLA 倒數**：Routing Engine 內建 ticker 掃描 `sla_due_at` 將到期/已逾期的案件，發提醒事件（為 Phase 4 的 SLA 管控預留，PoC 只做提醒不做升級）。
 
-> **M5 必解清單**（M3/M4 審查發現，入場前不能留白）：
-> 1. **reopen 語意**：升級性編輯 → `status='new'` 重新分析，但 `cases.review_id` 是 UNIQUE——已結案評論再惡化時，reopen 既有案件或撤銷 UNIQUE 允許多案件，二擇一。
-> 2. **事件只是提示**：`review.analyzed {review_id, analysis_id, risk_level}` 可能重複、可能過時（重放發的是現行值）——Routing 必須以 `review_id` 重讀 `is_current` 分析，以 `analysis_id` 冪等去重，**不得信任 payload 裡的 risk_level**。
-> 3. **analyzed-未建案對帳**：analyzer 在「commit 後、publish 前」死亡且重試耗盡時事件永久遺失，stale-new 掃描救不到（status 已非 new）——Routing 需要「status='analyzed' 且無 case」的定期補撈。
+> **M5 必解清單 → 已實作**（決策記錄）：
+> 1. **reopen 語意**：保留 `cases.review_id UNIQUE`，一則評論一個案件執行緒。決策矩陣：
+>    同 `analysis_id` → Replay（僅補發事件）；開放中風險升 → **Escalated**（換規則、SLA 重算、
+>    補指派）；開放中風險未升 → Acknowledged（只收指標）；已結案遇新分析 → **Reopened**
+>    （`reopened_count++`、SLA 重算）。歷史全在 audit_logs。
+> 2. **事件僅提示**：Routing 只取事件的 `review_id`，一律重讀 `is_current` 分析；
+>    冪等鍵 = `cases.analysis_id` 指標；`case.created` 亦僅提示，下游以 (case_id, analysis_id) 去重。
+> 3. **analyzed-未建案對帳**：60s 掃描「現行分析未被案件 analysis_id 認領」（涵蓋漏建案
+>    與漏升級），每輪上限 20。SLA 逾期提醒每案一次（`sla_reminded_at`），Notifier 以
+>    Sender 介面抽換（PoC=log，M-real=SMTP/LINE Messaging API）。
 
 ---
 

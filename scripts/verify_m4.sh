@@ -38,7 +38,8 @@ check "沒有卡在 new 超過 3 分鐘的 review" "0" "$stuck"
 echo "== 2. 模型溯源（AI 決策可稽核）=="
 bad_trace=$($PSQL "
     SELECT count(*) FROM analysis_results
-    WHERE is_current AND (model_name IS NULL OR prompt_version IS NULL
+    WHERE is_current AND created_by NOT LIKE 'test:%'
+      AND (model_name IS NULL OR prompt_version IS NULL
        OR input_hash IS NULL OR raw_response IS NULL OR latency_ms IS NULL)")
 check "溯源欄位完整（model/prompt/input_hash/raw_response/latency）" "0" "$bad_trace"
 

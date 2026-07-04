@@ -17,6 +17,7 @@ import (
 const (
 	StreamCrawl   = "CRAWL"
 	StreamReviews = "REVIEWS"
+	StreamCases   = "CASES"
 	MaxDeliver    = 4 // 重試上限，超過進 dead_letter
 )
 
@@ -54,6 +55,7 @@ func (q *Queue) EnsureStreams(ctx context.Context) error {
 		{Name: StreamCrawl, Subjects: []string{"crawl.jobs.>"}, Retention: jetstream.WorkQueuePolicy},
 		// MaxAge 防止無人消費時 volume 無限成長；M3 接上 ingestion 前的保險
 		{Name: StreamReviews, Subjects: []string{"review.>"}, MaxAge: 30 * 24 * time.Hour},
+		{Name: StreamCases, Subjects: []string{"case.>"}, MaxAge: 30 * 24 * time.Hour},
 	} {
 		if _, err := q.JS.CreateOrUpdateStream(ctx, cfg); err != nil {
 			return fmt.Errorf("ensure stream %s: %w", cfg.Name, err)
@@ -91,6 +93,39 @@ func (q *Queue) PublishReviewCreated(ctx context.Context, reviewID string) error
 	data, _ := json.Marshal(ReviewCreatedMsg{ReviewID: reviewID})
 	_, err := q.JS.Publish(ctx, "review.created", data)
 	return err
+}
+
+// ReviewAnalyzedMsg：依 M5 契約，payload 僅是提示——Routing 只取 review_id，
+// 一律重讀 is_current 分析，不信 payload 裡的 risk_level
+type ReviewAnalyzedMsg struct {
+	ReviewID string `json:"review_id"`
+}
+
+type CaseEventMsg struct {
+	CaseID     string `json:"case_id"`
+	ReviewID   string `json:"review_id"`
+	AnalysisID string `json:"analysis_id"` // 下游冪等鍵
+	RiskLevel  string `json:"risk_level"`
+	Action     string `json:"action"` // created / escalated / reopened / replay
+}
+
+func (q *Queue) PublishCaseEvent(ctx context.Context, m CaseEventMsg) error {
+	data, _ := json.Marshal(m)
+	_, err := q.JS.Publish(ctx, "case.created", data)
+	return err
+}
+
+// ConsumeReviewAnalyzed 供 Routing 以 durable consumer 消費
+func (q *Queue) ConsumeReviewAnalyzed(ctx context.Context, handler Handler) (jetstream.ConsumeContext, error) {
+	return q.consume(ctx, StreamReviews, jetstream.ConsumerConfig{
+		Durable:       "routing",
+		FilterSubject: "review.analyzed",
+		AckWait:       time.Minute,
+	}, func(data []byte) (string, error) {
+		var m ReviewAnalyzedMsg
+		err := json.Unmarshal(data, &m)
+		return m.ReviewID, err
+	}, 5*time.Second, handler)
 }
 
 // Handler：err=nil → Ack；錯誤 → 線性退避重試；達 MaxDeliver → Term。
