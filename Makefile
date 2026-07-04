@@ -1,6 +1,6 @@
 COMPOSE = docker compose -f deploy/docker-compose.yml
 
-.PHONY: up down clean migrate migrate-down psql nats-check verify test test-integration
+.PHONY: up down clean migrate migrate-down psql nats-check verify test test-integration crawl-wacheng
 
 test:          ## 單元測試（Docker 內跑，不需本機 Go）
 	docker run --rm -v $(PWD)/crawler:/src -v wachen-gomod:/go/pkg/mod -w /src \
@@ -42,8 +42,16 @@ migrate-down:  ## 回退一版 migration
 psql:          ## 進入 psql
 	$(COMPOSE) exec postgres psql -U wachen -d wachen
 
+tunnel:        ## Cloudflare Tunnel（HTTPS 對外分享後台）：make tunnel ARGS=start|stop|check
+	bash scripts/tunnel.sh $(or $(ARGS),check)
+
 nats-check:    ## 檢查 NATS JetStream 狀態（port 不對外，容器內查）
 	$(COMPOSE) exec -T nats wget -qO- http://localhost:8222/jsz
+
+crawl-wacheng: ## 爬台北瓦城集團 Google 評論（需 deploy/.env 填 GOOGLE_PLACES_API_KEY）
+	docker run --rm --network deploy_default --env-file deploy/.env \
+		-v $(PWD)/scripts:/scripts -w /scripts python:3.12-alpine \
+		python3 crawl_wacheng_places.py
 
 verify:        ## 全部驗收：M1 audit + M2 抓取 + M3 ingestion + M4 AI + M5 分流 + M6 後台
 	bash scripts/verify_m1.sh
