@@ -39,6 +39,47 @@ services:
     volumes:
       - natsdata:/data
 
+  mockgoogle:
+    build: ../crawler
+    image: wachen-crawler
+    container_name: wachen-mockgoogle
+    command: ["/bin/mockgoogle"]
+    environment:
+      PORT: "8081"
+      MOCK_INTERVAL: "20s"
+      MOCK_SEED_COUNT: "8"
+    ports:
+      - "8081:8081"
+
+  scheduler:
+    image: wachen-crawler
+    container_name: wachen-scheduler
+    command: ["/bin/scheduler"]
+    environment:
+      DATABASE_URL: postgres://app_user:app_dev_password@postgres:5432/wachen?sslmode=disable
+      NATS_URL: nats://nats:4222
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mockgoogle:
+        condition: service_started
+      nats:
+        condition: service_started
+
+  worker:
+    image: wachen-crawler
+    command: ["/bin/worker"]
+    environment:
+      DATABASE_URL: postgres://app_user:app_dev_password@postgres:5432/wachen?sslmode=disable
+      NATS_URL: nats://nats:4222
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_started
+    deploy:
+      replicas: 2   # 分散式驗證：兩個 worker 分食任務；可用 --scale worker=N 再加
+
   adminer:
     image: adminer:4
     container_name: wachen-adminer

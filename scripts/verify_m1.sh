@@ -72,16 +72,26 @@ check "raw_reviews DELETE 被拒" "1" "$delete_blocked"
 audit_tamper=$($PSQL -c "DELETE FROM audit_logs WHERE table_name = 'raw_reviews'" 2>&1 | grep -c "append-only")
 check "audit_logs DELETE 被拒" "1" "$audit_tamper"
 
-echo "== 3. 去重：同 (source_name, external_id) 冪等跳過 =="
+echo "== 3. 版本化去重：同 (source, external_id, content_hash) 冪等跳過；內容變更 = 新版本 =="
 dup=$($PSQL -c "
     BEGIN;
     SET LOCAL app.current_actor = 'test:verify';
     INSERT INTO raw_reviews (source_name, external_id, payload, content_hash, fetched_at)
-    VALUES ('verify', 'ext-001', '{}', 'x', now())
-    ON CONFLICT (source_name, external_id) DO NOTHING;
+    VALUES ('verify', 'ext-001', '{\"text\": \"難吃\"}', 'hash001', now())
+    ON CONFLICT (source_name, external_id, content_hash) DO NOTHING;
     COMMIT;
     SELECT count(*) FROM raw_reviews WHERE external_id = 'ext-001'")
-check "重複抓取不產生重複資料" "1" "$dup"
+check "相同內容重抓不產生重複資料" "1" "$dup"
+
+ver=$($PSQL -c "
+    BEGIN;
+    SET LOCAL app.current_actor = 'test:verify';
+    INSERT INTO raw_reviews (source_name, external_id, payload, content_hash, fetched_at)
+    VALUES ('verify', 'ext-001', '{\"text\": \"難吃，吃完中毒\"}', 'hash002', now())
+    ON CONFLICT (source_name, external_id, content_hash) DO NOTHING;
+    COMMIT;
+    SELECT count(*) FROM raw_reviews WHERE external_id = 'ext-001'")
+check "編輯過的評論成為新版本列" "2" "$ver"
 
 echo "== 4. 種子資料 =="
 rules=$($PSQL -c "SELECT count(*) FROM routing_rules WHERE enabled")

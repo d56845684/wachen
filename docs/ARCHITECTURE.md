@@ -127,8 +127,12 @@ type ReplyResult struct {
 
 ### 2.3 分散式關鍵機制
 
+- **任務粒度 = source × location**：500 家連鎖 = 500 個可平行小任務，worker 才能真正分食；單一門市慢/壞只影響自己。
 - **工作分配**：靠 MQ consumer group 天然分配，worker 不需互相知道彼此。
-- **去重**：`(source_name, external_id)` 唯一鍵 + payload `content_hash`，重抓到同一則直接冪等跳過（`ON CONFLICT DO NOTHING`）。
+- **版本化去重**：`(source_name, external_id, content_hash)` 唯一鍵——相同內容重抓冪等跳過；**顧客編輯過的評論（如 3 星改 1 星）content_hash 改變，成為新版本列**，append-only 不變、升級性編輯不丟失。M3 歸一化取「同 external_id 最新版本」。
+- **孤兒任務回收（reaper）**：worker 崩潰卡 `running`、或派工後 publish 失敗留下孤兒 `pending`，都會讓來源靜默停擺——scheduler leader 每輪 tick 把超時任務改 `failed`，下一輪 cron 自然重排（重抓冪等）。
+- **事件不丟失**：`review.raw` publish 失敗 = 任務失敗觸發重試；重試時既有版本列也補發事件（M3 以 raw_review_id 冪等）。
+- **防腦裂**：leader 每 tick 在 advisory lock 連線上心跳，PG 斷線即退位重新競選，避免雙 leader 重複派工燒 API 配額。
 - **增量抓取**：每個 source 維護 `cursor`（上次抓到的時間戳/page token），存在 `crawl_jobs` 結果中，下次排程接續。
 - **速率限制**：每個 Adapter 自帶 rate limiter（token bucket），配置存 `sources.config`。
 - **重試**：MQ ack/nack + 指數退避，超過 N 次進 dead-letter，落 `crawl_jobs.status = 'failed'` 供人工檢視。
@@ -209,7 +213,7 @@ reply.result             Reply Worker → Backend（更新回覆狀態）
 
 1. 消費 `review.analyzed` → 依 `risk_level` 查規則 → 建立 `cases`（含 `sla_due_at`）。
 2. 建立 `case_assignments`（可多人：高風險 = 客服 + 公關）。
-3. 發通知：PoC 先做 **Email + LINE Notify**，每則通知落 `notifications` 表（狀態：pending/sent/failed，含重試）。
+3. 發通知：PoC 先做 **Email + LINE Messaging API push**（注意：LINE Notify 已於 2025-03-31 停止服務，須用官方帳號 + Messaging API，有訊息配額成本），每則通知落 `notifications` 表（狀態：pending/sent/failed，含重試）。
 4. **SLA 倒數**：Routing Engine 內建 ticker 掃描 `sla_due_at` 將到期/已逾期的案件，發提醒事件（為 Phase 4 的 SLA 管控預留，PoC 只做提醒不做升級）。
 
 ---
@@ -312,8 +316,9 @@ erDiagram
 | 表 | 重點欄位 | 說明 |
 |---|---|---|
 | `sources` | name, adapter, config(jsonb), capabilities(jsonb), schedule_cron, enabled | 來源設定 + 能力宣告（can_reply 等），新增來源不改程式 |
-| `crawl_jobs` | source_id, status, cursor(jsonb), worker_id, started_at, finished_at, error, stats(jsonb) | 每次抓取任務全記錄 — 爬蟲側稽核 |
-| `raw_reviews` | source_name, external_id, payload(jsonb), content_hash, fetched_at, crawl_job_id, source_url | **append-only 原始資料**，UNIQUE(source_name, external_id) |
+| `crawl_jobs` | source_id, **location_id**, status, cursor_state(jsonb), worker_id, started_at, finished_at, error, stats(jsonb) | 每次抓取任務全記錄 — 爬蟲側稽核；粒度 = source × location，stats 含 page_cap_hit 截斷標記 |
+| `stores` | name, google_location_id(UNIQUE), google_place_id | location→門市對映；分流指派、收件匣篩選、source_url deep link 都靠它 |
+| `raw_reviews` | source_name, external_id, payload(jsonb), content_hash, source_url, location_id, fetched_at, crawl_job_id | **append-only 原始資料**，UNIQUE(source_name, external_id, **content_hash**)——編輯 = 新版本列 |
 | `reviews` | raw_review_id, author, rating, content, posted_at, store_id, status, **source_url** | 正規化統一格式；source_url = 該則留言 permalink，一鍵跳回原頁 |
 | `analysis_results` | review_id, sentiment, sentiment_score, categories, keywords, risk_level, model_name, model_version, prompt_version, raw_response, is_current | AI 判斷 + 完整模型溯源，允許多版本 |
 | `cases` | review_id, risk_level, rule_id, status, sla_due_at, responded_at | 案件主體 |
@@ -398,9 +403,10 @@ poc-wachen/
 |---|---|---|
 | M1 | DB schema + audit trigger + docker-compose 骨架 | 任何寫入都自動產生 audit_logs |
 | M2 | Google Review adapter + Scheduler + 2 個 worker | 分散式抓取、去重、增量 cursor 有效；每則留言帶可點擊的 source_url |
-| M3 | Webhook Gateway（模擬官網留言/客服） | 第二種來源型態（推送）打通 |
+| M3 | **Ingestion Service**（review.raw → 正規化 → reviews → review.created，含 store_id 填入與版本歸一）+ Webhook Gateway（模擬官網留言/客服） | 第二種來源型態（推送）打通；M4 依賴的 review.created 在此產生 |
 | M4 | Python 分析 worker（LLM 管線） | 情緒/分類/關鍵字/嚴重度四項輸出 + 模型溯源落庫 |
-| M5 | Routing Engine + Email/LINE 通知 | 高風險案件從「留言出現」到「通知送達」端到端 < 5 分鐘 |
+| M5 | Routing Engine + Email/LINE 通知 | 高風險案件從「**review.raw 事件**」到「通知送達」端到端 < 5 分鐘（偵測延遲由來源輪詢週期決定、可配置，另計） |
+| **M-R** | **真實 API 驗證（平行軌道）**：GBP 審核通過後，對一家真門市拉真評論 + 發一次真回覆 | **PoC 唯一真正不確定的事**——v4 API 已標棄用、審核要數週；不擋 M3/M4 開發，但 M7/M8 驗收以此為前置 |
 | M6 | 後台介面：收件匣 + 案件詳情 + 登入/RBAC | 手機瀏覽器完成「點 LINE 通知 → 開案件 → 檢視 AI 分析 → 跳原始留言」全流程 |
 | M7 | 回覆留言：回覆撰寫/審核 UI + Reply Worker | 從後台回覆 Google Review 成功、冪等（MQ 重投不重複發文）、審核鏈落 audit_logs |
 | M8 | 端到端 demo + 壓測（模擬 1000 則/小時） | worker 水平擴展有效、無資料遺失 |
