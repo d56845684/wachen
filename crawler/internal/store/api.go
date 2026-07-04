@@ -54,8 +54,17 @@ type CaseSummary struct {
 	PostedAt      *time.Time `json:"posted_at"`
 }
 
-// ListCases：收件匣。risk/status 空字串 = 不過濾；排序：逾期優先 → SLA 逼近優先
-func (s *Store) ListCases(ctx context.Context, risk, status string, limit int) ([]CaseSummary, error) {
+// CaseFilter：收件匣篩選條件，各欄位空字串 = 不過濾
+type CaseFilter struct {
+	Risk   string
+	Status string
+	Store  string // stores.google_location_id（未對映門市用特殊值 "__none__"）
+	Source string // reviews.source_name
+	Limit  int
+}
+
+// ListCases：收件匣。排序：逾期優先 → SLA 逼近優先
+func (s *Store) ListCases(ctx context.Context, f CaseFilter) ([]CaseSummary, error) {
 	rows, err := s.Pool.Query(ctx, `
 		SELECT c.id, c.risk_level, c.status, c.sla_due_at,
 		       c.sla_reminded_at IS NOT NULL, c.reopened_count, c.created_at,
@@ -69,10 +78,12 @@ func (s *Store) ListCases(ctx context.Context, risk, status string, limit int) (
 		WHERE c.deleted_at IS NULL
 		  AND ($1 = '' OR c.risk_level = $1)
 		  AND ($2 = '' OR c.status = $2)
+		  AND ($3 = '' OR st.google_location_id = $3 OR ($3 = '__none__' AND v.store_id IS NULL))
+		  AND ($4 = '' OR v.source_name = $4)
 		  AND v.source_name NOT LIKE 'test_%'
 		ORDER BY (c.sla_due_at < now() AND c.status IN ('open','in_progress')) DESC,
 		         c.sla_due_at ASC
-		LIMIT $3`, risk, status, limit)
+		LIMIT $5`, f.Risk, f.Status, f.Store, f.Source, f.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -87,6 +98,51 @@ func (s *Store) ListCases(ctx context.Context, risk, status string, limit int) (
 			return nil, err
 		}
 		out = append(out, cs)
+	}
+	return out, rows.Err()
+}
+
+type Facet struct {
+	Value string `json:"value"`
+	Label string `json:"label"`
+	Count int    `json:"count"`
+}
+
+// CaseFacets：目前有案件的門市與來源清單（供收件匣下拉選單，附案件數）
+func (s *Store) CaseFacets(ctx context.Context) (stores, sources []Facet, err error) {
+	stores, err = s.queryFacets(ctx, `
+		SELECT coalesce(st.google_location_id, '__none__'),
+		       coalesce(st.name, '未對映門市'), count(*)
+		FROM cases c
+		JOIN reviews v ON v.id = c.review_id
+		LEFT JOIN stores st ON st.id = v.store_id AND st.deleted_at IS NULL
+		WHERE c.deleted_at IS NULL AND v.source_name NOT LIKE 'test_%'
+		GROUP BY 1, 2 ORDER BY 3 DESC`)
+	if err != nil {
+		return nil, nil, err
+	}
+	sources, err = s.queryFacets(ctx, `
+		SELECT v.source_name, v.source_name, count(*)
+		FROM cases c
+		JOIN reviews v ON v.id = c.review_id
+		WHERE c.deleted_at IS NULL AND v.source_name NOT LIKE 'test_%'
+		GROUP BY 1 ORDER BY 3 DESC`)
+	return stores, sources, err
+}
+
+func (s *Store) queryFacets(ctx context.Context, sql string) ([]Facet, error) {
+	rows, err := s.Pool.Query(ctx, sql)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Facet{}
+	for rows.Next() {
+		var f Facet
+		if err := rows.Scan(&f.Value, &f.Label, &f.Count); err != nil {
+			return nil, err
+		}
+		out = append(out, f)
 	}
 	return out, rows.Err()
 }

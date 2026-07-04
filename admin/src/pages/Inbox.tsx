@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, CaseSummary } from "../api";
+import { api, CaseFilters, CaseSummary, Facet } from "../api";
 import { RiskSeal, SLACountdown, Stars, StatusPill } from "../components";
 
 const RISKS = [
@@ -17,39 +17,76 @@ const STATUSES = [
   ["closed", "已結案"],
 ] as const;
 
+const EMPTY: CaseFilters = { risk: "", status: "", store: "", source: "" };
+
 export default function Inbox() {
   const nav = useNavigate();
-  const [risk, setRisk] = useState("");
-  const [status, setStatus] = useState("");
+  const [filters, setFilters] = useState<CaseFilters>(EMPTY);
   const [cases, setCases] = useState<CaseSummary[] | null>(null);
+  const [stores, setStores] = useState<Facet[]>([]);
+  const [sources, setSources] = useState<Facet[]>([]);
+
+  // facets 只在載入時抓一次（門市/來源清單相對穩定）
+  useEffect(() => {
+    api.facets().then((f) => {
+      setStores(f.stores);
+      setSources(f.sources);
+    });
+  }, []);
 
   useEffect(() => {
     let live = true;
-    api.listCases(risk, status).then((r) => live && setCases(r.cases));
-    const t = setInterval(
-      () => api.listCases(risk, status).then((r) => live && setCases(r.cases)),
-      30_000, // 收件匣半即時：30s 輪詢（PoC；正式版換 SSE/WebSocket）
-    );
+    const fetch = () => api.listCases(filters).then((r) => live && setCases(r.cases));
+    fetch();
+    const t = setInterval(fetch, 30_000); // 半即時：30s 輪詢（PoC）
     return () => {
       live = false;
       clearInterval(t);
     };
-  }, [risk, status]);
+  }, [filters]);
+
+  const set = (patch: Partial<CaseFilters>) => setFilters((f) => ({ ...f, ...patch }));
+  const active = filters.risk || filters.status || filters.store || filters.source;
 
   return (
     <div className="page">
       <div className="filters">
         {RISKS.map(([v, label]) => (
-          <button key={v} className={`chip${risk === v ? " on" : ""}`} onClick={() => setRisk(v)}>
+          <button key={v} className={`chip${filters.risk === v ? " on" : ""}`} onClick={() => set({ risk: v })}>
             {label}
           </button>
         ))}
         <div className="sep" />
         {STATUSES.map(([v, label]) => (
-          <button key={v} className={`chip${status === v ? " on" : ""}`} onClick={() => setStatus(v)}>
+          <button key={v} className={`chip${filters.status === v ? " on" : ""}`} onClick={() => set({ status: v })}>
             {label}
           </button>
         ))}
+      </div>
+
+      <div className="filters">
+        <select className="select" value={filters.store} onChange={(e) => set({ store: e.target.value })}>
+          <option value="">全部門市</option>
+          {stores.map((s) => (
+            <option key={s.value} value={s.value}>
+              {s.label}（{s.count}）
+            </option>
+          ))}
+        </select>
+        <select className="select" value={filters.source} onChange={(e) => set({ source: e.target.value })}>
+          <option value="">全部來源</option>
+          {sources.map((s) => (
+            <option key={s.value} value={s.value}>
+              {s.label}（{s.count}）
+            </option>
+          ))}
+        </select>
+        {active && (
+          <button className="chip clear" onClick={() => setFilters(EMPTY)}>
+            清除篩選 ✕
+          </button>
+        )}
+        {cases && <span className="count">{cases.length} 件</span>}
       </div>
 
       {cases === null ? (

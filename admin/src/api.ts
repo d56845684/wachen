@@ -72,16 +72,30 @@ export interface CaseDetail extends CaseSummary {
   notifications: Notification[];
 }
 
+export interface Facet {
+  value: string;
+  label: string;
+  count: number;
+}
+
+export interface CaseFilters {
+  risk: string;
+  status: string;
+  store: string;
+  source: string;
+}
+
 export const api = {
   login: (email: string, password: string) =>
     request<{ token: string; name: string }>("/login", {
       method: "POST",
       body: JSON.stringify({ email, password }),
     }),
-  listCases: (risk: string, status: string) =>
-    request<{ cases: CaseSummary[] }>(
-      `/cases?risk=${encodeURIComponent(risk)}&status=${encodeURIComponent(status)}`,
-    ),
+  listCases: (f: CaseFilters) => {
+    const q = new URLSearchParams({ ...f }).toString();
+    return request<{ cases: CaseSummary[] }>(`/cases?${q}`);
+  },
+  facets: () => request<{ stores: Facet[]; sources: Facet[] }>("/facets"),
   caseDetail: (id: string) => request<CaseDetail>(`/cases/${id}`),
   updateStatus: (id: string, status: string) =>
     request<{ status: string }>(`/cases/${id}/status`, {

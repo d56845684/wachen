@@ -55,6 +55,25 @@ cs = json.load(sys.stdin)['cases']
 print(0 if any(c['risk_level'] != 'high' for c in cs) else 1)" 2>/dev/null || echo 0)
 check "風險過濾正確（risk=high）" "1" "$high_only"
 
+FACETS=$($WCURL -H "Authorization: Bearer $TOKEN" "$BASE/api/v1/facets")
+nstores=$(echo "$FACETS" | python3 -c "import json,sys; print(len(json.load(sys.stdin)['stores']))" 2>/dev/null || echo 0)
+check_ge "facets 回傳門市清單" 1 "$nstores"
+
+SRC=$(echo "$FACETS" | python3 -c "import json,sys; print(json.load(sys.stdin)['sources'][0]['value'])" 2>/dev/null)
+src_only=$($WCURL -H "Authorization: Bearer $TOKEN" "$BASE/api/v1/cases?source=$SRC" | python3 -c "
+import json,sys
+cs = json.load(sys.stdin)['cases']
+print(0 if any(c['source_name'] != '$SRC' for c in cs) else 1)" 2>/dev/null || echo 0)
+check "來源過濾正確（source=${SRC}）" "1" "$src_only"
+
+LOC=$(echo "$FACETS" | python3 -c "
+import json,sys
+for s in json.load(sys.stdin)['stores']:
+    if s['value'] != '__none__': print(s['value']); break" 2>/dev/null)
+store_scoped=$($WCURL -H "Authorization: Bearer $TOKEN" "$BASE/api/v1/cases?store=$LOC" | python3 -c "
+import json,sys; print(1 if len(json.load(sys.stdin)['cases']) > 0 else 0)" 2>/dev/null || echo 0)
+check "門市過濾有結果（store=${LOC}）" "1" "$store_scoped"
+
 detail_ok=$($WCURL -H "Authorization: Bearer $TOKEN" "$BASE/api/v1/cases/$CASE_ID" | python3 -c "
 import json,sys
 d = json.load(sys.stdin)

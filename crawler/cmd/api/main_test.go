@@ -20,6 +20,7 @@ type fakeAPIStore struct {
 	updateErr  error
 	lastActor  string
 	lastStatus string
+	lastFilter store.CaseFilter
 }
 
 func (f *fakeAPIStore) AuthUser(_ context.Context, email, password string) (*store.AuthedUser, error) {
@@ -28,8 +29,13 @@ func (f *fakeAPIStore) AuthUser(_ context.Context, email, password string) (*sto
 	}
 	return nil, nil
 }
-func (f *fakeAPIStore) ListCases(_ context.Context, _, _ string, _ int) ([]store.CaseSummary, error) {
+func (f *fakeAPIStore) ListCases(_ context.Context, filter store.CaseFilter) ([]store.CaseSummary, error) {
+	f.lastFilter = filter
 	return f.cases, nil
+}
+func (f *fakeAPIStore) CaseFacets(_ context.Context) ([]store.Facet, []store.Facet, error) {
+	return []store.Facet{{Value: "locations/mock-loc-1", Label: "一號店", Count: 3}},
+		[]store.Facet{{Value: "google_review_mock_a", Label: "google_review_mock_a", Count: 3}}, nil
 }
 func (f *fakeAPIStore) GetCaseDetail(_ context.Context, _ string) (*store.CaseDetail, error) {
 	return f.detail, nil
@@ -149,6 +155,63 @@ func TestListAndDetailWithToken(t *testing.T) {
 	resp = authedReq(t, http.MethodGet, ts.URL+"/api/v1/cases/c1", out["token"], "")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("detail: %d", resp.StatusCode)
+	}
+}
+
+// 門市/來源篩選：query 參數要完整帶進 store filter
+func TestListCasesPassesStoreAndSourceFilters(t *testing.T) {
+	st := &fakeAPIStore{user: adminUser()}
+	ts := newServer(st)
+	defer ts.Close()
+	_, out := doLogin(t, ts, "admin@example.com", "Wachen!2026")
+
+	resp := authedReq(t, http.MethodGet,
+		ts.URL+"/api/v1/cases?risk=high&status=open&store=locations/mock-loc-1&source=google_review_mock_a",
+		out["token"], "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("list: %d", resp.StatusCode)
+	}
+	f := st.lastFilter
+	if f.Risk != "high" || f.Status != "open" ||
+		f.Store != "locations/mock-loc-1" || f.Source != "google_review_mock_a" {
+		t.Errorf("filter not fully passed through: %+v", f)
+	}
+}
+
+func TestFacetsEndpoint(t *testing.T) {
+	st := &fakeAPIStore{user: adminUser()}
+	ts := newServer(st)
+	defer ts.Close()
+	_, out := doLogin(t, ts, "admin@example.com", "Wachen!2026")
+
+	resp := authedReq(t, http.MethodGet, ts.URL+"/api/v1/facets", out["token"], "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("facets: %d", resp.StatusCode)
+	}
+	var body struct {
+		Stores  []store.Facet `json:"stores"`
+		Sources []store.Facet `json:"sources"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&body)
+	if len(body.Stores) != 1 || body.Stores[0].Label != "一號店" || body.Stores[0].Count != 3 {
+		t.Errorf("stores facet = %+v", body.Stores)
+	}
+	if len(body.Sources) != 1 {
+		t.Errorf("sources facet = %+v", body.Sources)
+	}
+}
+
+// facets 需要認證
+func TestFacetsRequiresAuth(t *testing.T) {
+	ts := newServer(&fakeAPIStore{})
+	defer ts.Close()
+	resp, err := http.Get(ts.URL + "/api/v1/facets")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("facets without token: %d, want 401", resp.StatusCode)
 	}
 }
 

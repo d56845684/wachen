@@ -134,7 +134,15 @@ button { font-family: var(--sans); cursor: pointer; }
   border: 1px solid var(--line-strong); background: none; color: var(--muted);
 }
 .chip.on { background: var(--paper); color: #26221a; border-color: var(--paper); font-weight: 700; }
+.chip.clear { color: var(--vermilion); border-color: var(--vermilion); }
 .filters .sep { width: 1px; background: var(--line-strong); margin: 4px 6px; }
+.select {
+  padding: 5px 12px; border-radius: 6px; font-size: 13px;
+  background: var(--ink-2); color: var(--text);
+  border: 1px solid var(--line-strong); font-family: var(--sans);
+}
+.select:focus { outline: none; border-color: var(--amber); }
+.filters .count { margin-left: auto; color: var(--faint); font-family: var(--mono); font-size: 12px; align-self: center; }
 
 .case-list { display: flex; flex-direction: column; gap: 10px; }
 .case-card {

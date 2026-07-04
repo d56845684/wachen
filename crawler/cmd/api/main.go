@@ -28,7 +28,8 @@ import (
 
 type apiStore interface {
 	AuthUser(ctx context.Context, email, password string) (*store.AuthedUser, error)
-	ListCases(ctx context.Context, risk, status string, limit int) ([]store.CaseSummary, error)
+	ListCases(ctx context.Context, f store.CaseFilter) ([]store.CaseSummary, error)
+	CaseFacets(ctx context.Context) (stores, sources []store.Facet, err error)
 	GetCaseDetail(ctx context.Context, caseID string) (*store.CaseDetail, error)
 	UpdateCaseStatus(ctx context.Context, caseID, newStatus, actor string) error
 }
@@ -47,6 +48,7 @@ func (s *server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/v1/login", s.login)
 	mux.Handle("GET /api/v1/cases", s.auth(s.listCases))
+	mux.Handle("GET /api/v1/facets", s.auth(s.facets))
 	mux.Handle("GET /api/v1/cases/{id}", s.auth(s.caseDetail))
 	mux.Handle("PATCH /api/v1/cases/{id}/status", s.auth(s.updateStatus))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
@@ -113,9 +115,14 @@ func (s *server) auth(next http.HandlerFunc) http.Handler {
 }
 
 func (s *server) listCases(w http.ResponseWriter, r *http.Request) {
-	risk := r.URL.Query().Get("risk")
-	status := r.URL.Query().Get("status")
-	cases, err := s.st.ListCases(r.Context(), risk, status, 200)
+	q := r.URL.Query()
+	cases, err := s.st.ListCases(r.Context(), store.CaseFilter{
+		Risk:   q.Get("risk"),
+		Status: q.Get("status"),
+		Store:  q.Get("store"),
+		Source: q.Get("source"),
+		Limit:  200,
+	})
 	if err != nil {
 		s.log.Error("list cases failed", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
@@ -125,6 +132,16 @@ func (s *server) listCases(w http.ResponseWriter, r *http.Request) {
 		cases = []store.CaseSummary{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"cases": cases})
+}
+
+func (s *server) facets(w http.ResponseWriter, r *http.Request) {
+	stores, sources, err := s.st.CaseFacets(r.Context())
+	if err != nil {
+		s.log.Error("facets failed", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"stores": stores, "sources": sources})
 }
 
 func (s *server) caseDetail(w http.ResponseWriter, r *http.Request) {
