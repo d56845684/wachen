@@ -3,18 +3,22 @@
 set -uo pipefail
 source "$(dirname "$0")/lib.sh"
 
+trap mock_teardown EXIT   # 測完（含失敗）一定砍掉 mock
+mock_setup
+
 # port 不對外：從 webhook 容器內部打自己（服務間一律走內部網路）
 WCURL="$COMPOSE exec -T webhook curl -s -o /dev/null -w %{http_code}"
 WEBHOOK_URL="http://localhost:8090/v1/sources/webhook_generic/reviews"
 SECRET="dev_webhook_secret"
 
 
-echo "== 等待 ingestion 消化爬蟲管線 =="
-deadline=$((SECONDS + 120))
+echo "== 等待 ingestion 消化爬蟲管線（含編輯反映成版本更新）=="
+deadline=$((SECONDS + 240))
 while [ $SECONDS -lt $deadline ]; do
     revs=$($PSQL "SELECT count(*) FROM reviews WHERE source_name LIKE 'google_review_mock%'")
-    echo "  ... reviews=$revs"
-    [ "${revs:-0}" -ge 8 ] && break
+    edited=$($PSQL "SELECT count(*) FROM reviews WHERE source_name LIKE 'google_review_mock%' AND version > 1")
+    echo "  ... reviews=$revs edited_versions=$edited"
+    [ "${revs:-0}" -ge 8 ] && [ "${edited:-0}" -ge 1 ] && break
     sleep 10
 done
 

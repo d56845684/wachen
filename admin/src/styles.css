@@ -318,3 +318,36 @@ blockquote.review {
 .rec-lat { font-family: var(--mono); font-size: 11px; color: var(--faint); }
 .rec-time { font-family: var(--mono); font-size: 11px; color: var(--faint); margin-left: auto; }
 .rec-summary { font-family: var(--serif); font-size: 14px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; }
+
+/* ---------- 回覆留言（M7）---------- */
+.reply-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
+.reply-item {
+  background: var(--ink-2); border: 1px solid var(--line); border-radius: 6px;
+  border-left: 3px solid var(--faint); padding: 10px 12px;
+}
+.reply-item.sent { border-left-color: var(--jade); }
+.reply-item.pending_approval { border-left-color: var(--amber); }
+.reply-item.rejected, .reply-item.failed { border-left-color: var(--vermilion); }
+.reply-top { display: flex; gap: 10px; align-items: center; font-size: 12px; margin-bottom: 5px; }
+.reply-st { font-family: var(--mono); font-size: 11px; padding: 1px 8px; border-radius: 3px; border: 1px solid var(--line-strong); color: var(--muted); }
+.reply-st.sent { color: var(--jade); border-color: var(--jade); }
+.reply-st.pending_approval { color: var(--amber); border-color: var(--amber); }
+.reply-st.rejected, .reply-st.failed { color: var(--vermilion); border-color: var(--vermilion); }
+.reply-by { color: var(--faint); }
+.reply-body { font-family: var(--serif); font-size: 14px; line-height: 1.6; white-space: pre-wrap; }
+.reply-err { color: var(--vermilion); font-size: 12px; margin-top: 4px; }
+
+.reply-form { display: flex; flex-direction: column; gap: 8px; }
+.reply-form textarea {
+  width: 100%; padding: 10px 12px; resize: vertical;
+  background: var(--ink-2); color: var(--text);
+  border: 1px solid var(--line-strong); border-radius: 6px;
+  font-family: var(--sans); font-size: 14px; line-height: 1.6;
+}
+.reply-form textarea:focus { outline: none; border-color: var(--amber); }
+.reply-actions { display: flex; align-items: center; gap: 10px; justify-content: flex-end; }
+.reply-hint { color: var(--amber); font-size: 12px; margin-right: auto; }
+.btn-action.send { background: var(--vermilion); color: #1a0d08; border-color: var(--vermilion); font-weight: 700; }
+.btn-action.send:hover { filter: brightness(1.12); color: #1a0d08; }
+.btn-action.send:disabled { filter: grayscale(0.6); cursor: not-allowed; }
+.btn-action.reject { color: var(--vermilion); border-color: var(--vermilion); }

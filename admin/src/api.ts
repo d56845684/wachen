@@ -60,6 +60,18 @@ export interface Notification {
   sent_at: string | null;
 }
 
+export interface Reply {
+  id: string;
+  case_id: string;
+  content: string;
+  status: "draft" | "pending_approval" | "approved" | "sending" | "sent" | "rejected" | "failed";
+  external_reply_id: string | null;
+  reply_url: string | null;
+  error: string | null;
+  created_by: string;
+  created_at: string;
+}
+
 export interface CaseDetail extends CaseSummary {
   review_content: string;
   author_name: string;
@@ -70,6 +82,18 @@ export interface CaseDetail extends CaseSummary {
   prompt_version: string;
   assignments: string[];
   notifications: Notification[];
+  can_reply: boolean;
+  replies: Reply[];
+}
+
+export interface PendingApproval {
+  id: string;
+  case_id: string;
+  content: string;
+  risk_level: string;
+  store_name: string;
+  summary: string;
+  created_at: string;
 }
 
 export interface Facet {
@@ -140,5 +164,18 @@ export const api = {
     request<{ status: string }>(`/cases/${id}/status`, {
       method: "PATCH",
       body: JSON.stringify({ status }),
+    }),
+  createReply: (caseId: string, content: string) =>
+    request<Reply>(`/cases/${caseId}/replies`, {
+      method: "POST",
+      body: JSON.stringify({ content }),
+    }),
+  approvals: () => request<{ replies: PendingApproval[] }>("/approvals"),
+  approveReply: (id: string) =>
+    request<{ status: string }>(`/replies/${id}/approve`, { method: "POST" }),
+  rejectReply: (id: string, reason: string) =>
+    request<{ status: string }>(`/replies/${id}/reject`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
     }),
 };

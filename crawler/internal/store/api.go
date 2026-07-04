@@ -315,6 +315,8 @@ type CaseDetail struct {
 	PromptVersion string          `json:"prompt_version"`
 	Assignments   []string        `json:"assignments"`
 	Notifications json.RawMessage `json:"notifications"` // [{channel,recipient,subject,status,sent_at}]
+	CanReply      bool            `json:"can_reply"`
+	Replies       []Reply         `json:"replies"`
 }
 
 func (s *Store) GetCaseDetail(ctx context.Context, caseID string) (*CaseDetail, error) {
@@ -357,6 +359,12 @@ func (s *Store) GetCaseDetail(ctx context.Context, caseID string) (*CaseDetail, 
 	}
 	if author != nil {
 		d.AuthorName = *author
+	}
+	if d.CanReply, _, _, err = s.caseReplyContext(ctx, s.Pool, caseID); err != nil {
+		return nil, err
+	}
+	if d.Replies, err = s.RepliesForCase(ctx, caseID); err != nil {
+		return nil, err
 	}
 	return &d, nil
 }

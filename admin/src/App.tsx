@@ -12,6 +12,7 @@ import Login from "./pages/Login";
 import Inbox from "./pages/Inbox";
 import CaseDetailPage from "./pages/CaseDetail";
 import Pipeline from "./pages/Pipeline";
+import Approvals from "./pages/Approvals";
 
 function Shell({ children }: { children: ReactNode }) {
   const nav = useNavigate();
@@ -27,6 +28,9 @@ function Shell({ children }: { children: ReactNode }) {
           </NavLink>
           <NavLink to="/pipeline" className={({ isActive }) => (isActive ? "on" : "")}>
             AI 進度
+          </NavLink>
+          <NavLink to="/approvals" className={({ isActive }) => (isActive ? "on" : "")}>
+            回覆審核
           </NavLink>
         </nav>
         <div className="spacer" />
@@ -53,6 +57,7 @@ export default function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/" element={<Shell><Inbox /></Shell>} />
         <Route path="/pipeline" element={<Shell><Pipeline /></Shell>} />
+        <Route path="/approvals" element={<Shell><Approvals /></Shell>} />
         <Route path="/cases/:id" element={<Shell><CaseDetailPage /></Shell>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

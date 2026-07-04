@@ -8,7 +8,8 @@ RUN go mod tidy && CGO_ENABLED=0 go build -o /out/scheduler ./cmd/scheduler \
     && CGO_ENABLED=0 go build -o /out/ingestion ./cmd/ingestion \
     && CGO_ENABLED=0 go build -o /out/webhook ./cmd/webhook \
     && CGO_ENABLED=0 go build -o /out/routing ./cmd/routing \
-    && CGO_ENABLED=0 go build -o /out/api ./cmd/api
+    && CGO_ENABLED=0 go build -o /out/api ./cmd/api \
+    && CGO_ENABLED=0 go build -o /out/replier ./cmd/replier
 
 FROM alpine:3.19
 RUN apk add --no-cache ca-certificates tzdata curl

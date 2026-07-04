@@ -17,10 +17,13 @@ type fakeAPIStore struct {
 	user       *store.AuthedUser
 	cases      []store.CaseSummary
 	detail     *store.CaseDetail
-	updateErr  error
-	lastActor  string
-	lastStatus string
-	lastFilter store.CaseFilter
+	updateErr        error
+	lastActor        string
+	lastStatus       string
+	lastFilter       store.CaseFilter
+	replyErr         error
+	replyStatus      string
+	lastReplyContent string
 }
 
 func (f *fakeAPIStore) AuthUser(_ context.Context, email, password string) (*store.AuthedUser, error) {
@@ -55,11 +58,35 @@ func (f *fakeAPIStore) UpdateCaseStatus(_ context.Context, _, newStatus, actor s
 	f.lastStatus, f.lastActor = newStatus, actor
 	return nil
 }
+func (f *fakeAPIStore) CreateReply(_ context.Context, caseID, content, author string) (*store.Reply, bool, error) {
+	if f.replyErr != nil {
+		return nil, false, f.replyErr
+	}
+	f.lastReplyContent = content
+	return &store.Reply{ID: "rep-1", CaseID: caseID, Content: content, Status: f.replyStatus, CreatedBy: author},
+		f.replyStatus == "approved", nil
+}
+func (f *fakeAPIStore) ApproveReply(_ context.Context, _, _ string) (bool, error) { return true, nil }
+func (f *fakeAPIStore) RejectReply(_ context.Context, _, _, _ string) error       { return nil }
+func (f *fakeAPIStore) PendingApprovals(_ context.Context, _ int) ([]store.PendingReply, error) {
+	return []store.PendingReply{{ID: "rep-1", RiskLevel: "high", Content: "抱歉造成不便"}}, nil
+}
+
+type fakeEnqueuer struct{ enqueued []string }
+
+func (f *fakeEnqueuer) PublishReplyRequested(_ context.Context, id string) error {
+	f.enqueued = append(f.enqueued, id)
+	return nil
+}
 
 var testLog = slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
 func newServer(st apiStore) *httptest.Server {
-	return httptest.NewServer((&server{st: st, log: testLog, secret: []byte("test-secret")}).routes())
+	return httptest.NewServer((&server{st: st, q: &fakeEnqueuer{}, log: testLog, secret: []byte("test-secret")}).routes())
+}
+
+func newServerWithQ(st apiStore, q enqueuer) *httptest.Server {
+	return httptest.NewServer((&server{st: st, q: q, log: testLog, secret: []byte("test-secret")}).routes())
 }
 
 func adminUser() *store.AuthedUser {
@@ -240,6 +267,81 @@ func TestPipelineEndpoint(t *testing.T) {
 	_ = json.NewDecoder(resp.Body).Decode(&p)
 	if p.Funnel.Reviews != 30 || p.AI.TotalAnalyses != 25 || len(p.AI.Models) != 1 {
 		t.Errorf("pipeline stats = %+v", p)
+	}
+}
+
+// 低/中風險回覆：建立即 approved 並入列送出
+func TestCreateReplyLowRiskEnqueues(t *testing.T) {
+	st := &fakeAPIStore{user: adminUser(), replyStatus: "approved"}
+	q := &fakeEnqueuer{}
+	ts := newServerWithQ(st, q)
+	defer ts.Close()
+	_, out := doLogin(t, ts, "admin@example.com", "Wachen!2026")
+
+	resp := authedReq(t, http.MethodPost, ts.URL+"/api/v1/cases/c1/replies", out["token"],
+		`{"content": "感謝您的回饋，我們已改善"}`)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create reply: %d", resp.StatusCode)
+	}
+	if st.lastReplyContent != "感謝您的回饋，我們已改善" {
+		t.Errorf("content = %q", st.lastReplyContent)
+	}
+	if len(q.enqueued) != 1 || q.enqueued[0] != "rep-1" {
+		t.Errorf("approved reply must enqueue, got %v", q.enqueued)
+	}
+}
+
+// 高風險回覆：建立為 pending_approval，不入列（等審核）
+func TestCreateReplyHighRiskWaitsApproval(t *testing.T) {
+	st := &fakeAPIStore{user: adminUser(), replyStatus: "pending_approval"}
+	q := &fakeEnqueuer{}
+	ts := newServerWithQ(st, q)
+	defer ts.Close()
+	_, out := doLogin(t, ts, "admin@example.com", "Wachen!2026")
+
+	resp := authedReq(t, http.MethodPost, ts.URL+"/api/v1/cases/c1/replies", out["token"],
+		`{"content": "已聯繫顧客處理"}`)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create reply: %d", resp.StatusCode)
+	}
+	if len(q.enqueued) != 0 {
+		t.Errorf("pending_approval must NOT enqueue, got %v", q.enqueued)
+	}
+}
+
+// 不支援回覆的來源 → 422
+func TestCreateReplyNotAllowed(t *testing.T) {
+	st := &fakeAPIStore{user: adminUser(), replyErr: store.ErrReplyNotAllowed}
+	ts := newServer(st)
+	defer ts.Close()
+	_, out := doLogin(t, ts, "admin@example.com", "Wachen!2026")
+
+	resp := authedReq(t, http.MethodPost, ts.URL+"/api/v1/cases/c1/replies", out["token"],
+		`{"content": "x"}`)
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422", resp.StatusCode)
+	}
+}
+
+// 核准 → 入列送出
+func TestApproveReplyEnqueues(t *testing.T) {
+	st := &fakeAPIStore{user: adminUser()}
+	q := &fakeEnqueuer{}
+	ts := newServerWithQ(st, q)
+	defer ts.Close()
+	_, out := doLogin(t, ts, "admin@example.com", "Wachen!2026")
+
+	resp := authedReq(t, http.MethodPost, ts.URL+"/api/v1/replies/rep-1/approve", out["token"], "")
+	if resp.StatusCode != http.StatusOK || len(q.enqueued) != 1 {
+		t.Fatalf("approve: %d enqueued=%v", resp.StatusCode, q.enqueued)
+	}
+}
+
+func TestApprovalsQueueRequiresAuth(t *testing.T) {
+	ts := newServer(&fakeAPIStore{})
+	defer ts.Close()
+	if resp, _ := http.Get(ts.URL + "/api/v1/approvals"); resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("approvals without token: %d, want 401", resp.StatusCode)
 	}
 }
 

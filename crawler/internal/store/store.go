@@ -42,14 +42,22 @@ func New(ctx context.Context, dsn, actor string) (*Store, error) {
 	return nil, fmt.Errorf("connect db: %w", err)
 }
 
-// withTx 開交易並設定稽核操作者
+// withTx 開交易並以服務身分（s.Actor）設定稽核操作者
 func (s *Store) withTx(ctx context.Context, fn func(tx pgx.Tx) error) error {
+	return s.withActorTx(ctx, s.Actor, fn)
+}
+
+// withActorTx 開交易並以指定 actor 設定稽核操作者（後台操作用登入者 user:<email>）
+func (s *Store) withActorTx(ctx context.Context, actor string, fn func(tx pgx.Tx) error) error {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.current_actor', $1, true)", s.Actor); err != nil {
+	if actor == "" {
+		actor = s.Actor
+	}
+	if _, err := tx.Exec(ctx, "SELECT set_config('app.current_actor', $1, true)", actor); err != nil {
 		return err
 	}
 	if err := fn(tx); err != nil {

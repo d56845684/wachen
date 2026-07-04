@@ -1,7 +1,17 @@
-import { useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, CaseDetail as Detail } from "../api";
 import { RiskSeal, SLACountdown, Stars, StatusPill, statusLabel } from "../components";
+
+const REPLY_STATUS: Record<string, string> = {
+  draft: "草稿",
+  pending_approval: "待審核",
+  approved: "已核准",
+  sending: "送出中",
+  sent: "已送出",
+  rejected: "已退回",
+  failed: "送出失敗",
+};
 
 // 與後端 validTransitions 對齊的動作表
 const ACTIONS: Record<string, [string, string][]> = {
@@ -15,6 +25,8 @@ export default function CaseDetailPage() {
   const { id = "" } = useParams();
   const [d, setD] = useState<Detail | null>(null);
   const [err, setErr] = useState("");
+  const [replyText, setReplyText] = useState("");
+  const [sending, setSending] = useState(false);
 
   const load = useCallback(() => {
     api.caseDetail(id).then(setD).catch((e) => setErr(String(e)));
@@ -28,6 +40,22 @@ export default function CaseDetailPage() {
       load();
     } catch (ex) {
       setErr(ex instanceof Error ? ex.message : "操作失敗");
+    }
+  }
+
+  async function submitReply(e: FormEvent) {
+    e.preventDefault();
+    if (!replyText.trim()) return;
+    setSending(true);
+    setErr("");
+    try {
+      await api.createReply(id, replyText.trim());
+      setReplyText("");
+      load();
+    } catch (ex) {
+      setErr(ex instanceof Error ? ex.message : "送出失敗");
+    } finally {
+      setSending(false);
     }
   }
 
@@ -76,6 +104,47 @@ export default function CaseDetailPage() {
               {" · "}
               <a href={d.source_url} target="_blank" rel="noreferrer">原始留言 ↗</a>
             </div>
+          </section>
+
+          <section className="panel">
+            <h3>回覆留言</h3>
+            {d.replies.length > 0 && (
+              <div className="reply-list">
+                {d.replies.map((rp) => (
+                  <div className={`reply-item ${rp.status}`} key={rp.id}>
+                    <div className="reply-top">
+                      <span className={`reply-st ${rp.status}`}>{REPLY_STATUS[rp.status] ?? rp.status}</span>
+                      <span className="reply-by">{rp.created_by.replace("svc:", "")}</span>
+                      {rp.reply_url && <a href={rp.reply_url} target="_blank" rel="noreferrer">已發佈 ↗</a>}
+                    </div>
+                    <div className="reply-body">{rp.content}</div>
+                    {rp.error && <div className="reply-err">{rp.error}</div>}
+                  </div>
+                ))}
+              </div>
+            )}
+            {d.can_reply ? (
+              <form className="reply-form" onSubmit={submitReply}>
+                <textarea
+                  value={replyText}
+                  onChange={(e) => setReplyText(e.target.value)}
+                  placeholder={
+                    d.risk_level === "high"
+                      ? "撰寫回覆…（高風險案件送出後需公關/法務審核）"
+                      : "撰寫回覆…"
+                  }
+                  rows={3}
+                />
+                <div className="reply-actions">
+                  {d.risk_level === "high" && <span className="reply-hint">⚠ 高風險：送出後進審核佇列</span>}
+                  <button className="btn-action send" disabled={sending || !replyText.trim()}>
+                    {sending ? "送出中…" : d.risk_level === "high" ? "送審" : "送出回覆"}
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <div className="byline">此來源不支援直接回覆（唯讀）</div>
+            )}
           </section>
 
           <section className="panel">

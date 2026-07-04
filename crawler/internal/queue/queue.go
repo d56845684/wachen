@@ -18,6 +18,7 @@ const (
 	StreamCrawl   = "CRAWL"
 	StreamReviews = "REVIEWS"
 	StreamCases   = "CASES"
+	StreamReplies = "REPLIES"
 	MaxDeliver    = 4 // 重試上限，超過進 dead_letter
 )
 
@@ -56,6 +57,7 @@ func (q *Queue) EnsureStreams(ctx context.Context) error {
 		// MaxAge 防止無人消費時 volume 無限成長；M3 接上 ingestion 前的保險
 		{Name: StreamReviews, Subjects: []string{"review.>"}, MaxAge: 30 * 24 * time.Hour},
 		{Name: StreamCases, Subjects: []string{"case.>"}, MaxAge: 30 * 24 * time.Hour},
+		{Name: StreamReplies, Subjects: []string{"reply.>"}, MaxAge: 30 * 24 * time.Hour},
 	} {
 		if _, err := q.JS.CreateOrUpdateStream(ctx, cfg); err != nil {
 			return fmt.Errorf("ensure stream %s: %w", cfg.Name, err)
@@ -125,6 +127,29 @@ func (q *Queue) ConsumeReviewAnalyzed(ctx context.Context, handler Handler) (jet
 		var m ReviewAnalyzedMsg
 		err := json.Unmarshal(data, &m)
 		return m.ReviewID, err
+	}, 5*time.Second, handler)
+}
+
+type ReplyRequestedMsg struct {
+	ReplyID string `json:"reply_id"`
+}
+
+func (q *Queue) PublishReplyRequested(ctx context.Context, replyID string) error {
+	data, _ := json.Marshal(ReplyRequestedMsg{ReplyID: replyID})
+	_, err := q.JS.Publish(ctx, "reply.requested", data)
+	return err
+}
+
+// ConsumeReplyRequested 供 Reply Worker 消費
+func (q *Queue) ConsumeReplyRequested(ctx context.Context, handler Handler) (jetstream.ConsumeContext, error) {
+	return q.consume(ctx, StreamReplies, jetstream.ConsumerConfig{
+		Durable:       "replier",
+		FilterSubject: "reply.requested",
+		AckWait:       time.Minute,
+	}, func(data []byte) (string, error) {
+		var m ReplyRequestedMsg
+		err := json.Unmarshal(data, &m)
+		return m.ReplyID, err
 	}, 5*time.Second, handler)
 }
 

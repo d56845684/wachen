@@ -6,39 +6,41 @@ source "$(dirname "$0")/lib.sh"
 
 
 echo "== 1. 稽核 trigger：INSERT / UPDATE / 軟刪除 都要落 audit_logs =="
-$PSQL_BASE <<'SQL' > /dev/null
+# 每輪唯一來源名（app_user 無 DELETE 權限，殘留會撞 UNIQUE，腳本要可重跑）
+VSRC="verify_source_$(date +%s)"
+$PSQL_BASE > /dev/null <<SQL
 BEGIN;
 SET LOCAL app.current_actor = 'test:verify';
 SET LOCAL app.request_id    = 'req-verify-001';
 INSERT INTO sources (name, adapter, config)
-VALUES ('verify_source', 'webhook_generic', '{"test": true}');
-UPDATE sources SET enabled = false WHERE name = 'verify_source';
-UPDATE sources SET deleted_at = now(), deleted_by = current_actor() WHERE name = 'verify_source';
+VALUES ('$VSRC', 'webhook_generic', '{"test": true}');
+UPDATE sources SET enabled = false WHERE name = '$VSRC';
+UPDATE sources SET deleted_at = now(), deleted_by = current_actor() WHERE name = '$VSRC';
 COMMIT;
 SQL
 
 audit_count=$($PSQL_BASE -c "
     SELECT count(*) FROM audit_logs a
     JOIN sources s ON s.id::text = a.record_id
-    WHERE a.table_name = 'sources' AND s.name = 'verify_source'")
+    WHERE a.table_name = 'sources' AND s.name = '$VSRC'")
 check "verify_source 產生 3 筆 audit_logs (INSERT + 2xUPDATE)" "3" "$audit_count"
 
 actor=$($PSQL_BASE -c "
     SELECT DISTINCT changed_by FROM audit_logs a
     JOIN sources s ON s.id::text = a.record_id
-    WHERE a.table_name = 'sources' AND s.name = 'verify_source'")
+    WHERE a.table_name = 'sources' AND s.name = '$VSRC'")
 check "changed_by 正確記錄操作者" "test:verify" "$actor"
 
 req=$($PSQL_BASE -c "
     SELECT DISTINCT request_id FROM audit_logs a
     JOIN sources s ON s.id::text = a.record_id
-    WHERE a.table_name = 'sources' AND s.name = 'verify_source'")
+    WHERE a.table_name = 'sources' AND s.name = '$VSRC'")
 check "request_id 正確串接" "req-verify-001" "$req"
 
-ver=$($PSQL_BASE -c "SELECT version FROM sources WHERE name = 'verify_source'")
+ver=$($PSQL_BASE -c "SELECT version FROM sources WHERE name = '$VSRC'")
 check "version 樂觀鎖自動遞增 (1→3)" "3" "$ver"
 
-upd_by=$($PSQL_BASE -c "SELECT updated_by FROM sources WHERE name = 'verify_source'")
+upd_by=$($PSQL_BASE -c "SELECT updated_by FROM sources WHERE name = '$VSRC'")
 check "updated_by 由 trigger 自動維護" "test:verify" "$upd_by"
 
 echo "== 2. append-only：raw_reviews / audit_logs 禁止 UPDATE/DELETE =="
@@ -87,7 +89,7 @@ check "sources 種子 (google_review + webhook)" "2" "$srcs"
 
 echo "== 5. app_user 權限（第二道防線）=="
 app_del=$($COMPOSE exec -T postgres psql "postgres://app_user:app_dev_password@localhost:5432/wachen" -qtA \
-    -c "DELETE FROM sources WHERE name = 'verify_source'" 2>&1 | grep -c "permission denied")
+    -c "DELETE FROM sources WHERE name = '$VSRC'" 2>&1 | grep -c "permission denied")
 check "app_user 無 DELETE 權限（強制軟刪除）" "1" "$app_del"
 
 finish "M1"

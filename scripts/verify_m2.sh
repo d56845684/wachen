@@ -3,6 +3,9 @@
 set -uo pipefail
 source "$(dirname "$0")/lib.sh"
 
+trap mock_teardown EXIT   # 測完（含失敗）一定砍掉 mock
+mock_setup
+
 
 
 echo "== 等待管線運轉（scheduler 每 10s 派工、mock 每 20s 產生事件、約 1/3 是編輯）=="

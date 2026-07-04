@@ -67,3 +67,4 @@ verify:        ## 全部驗收：M1 audit + M2 抓取 + M3 ingestion + M4 AI + M
 	bash scripts/verify_m4.sh
 	bash scripts/verify_m5.sh
 	bash scripts/verify_m6.sh
+	bash scripts/verify_m7.sh

@@ -33,10 +33,20 @@ type apiStore interface {
 	GetPipelineStats(ctx context.Context) (*store.PipelineStats, error)
 	GetCaseDetail(ctx context.Context, caseID string) (*store.CaseDetail, error)
 	UpdateCaseStatus(ctx context.Context, caseID, newStatus, actor string) error
+	CreateReply(ctx context.Context, caseID, content, authorEmail string) (*store.Reply, bool, error)
+	ApproveReply(ctx context.Context, replyID, approverEmail string) (bool, error)
+	RejectReply(ctx context.Context, replyID, approverEmail, reason string) error
+	PendingApprovals(ctx context.Context, limit int) ([]store.PendingReply, error)
+}
+
+// enqueuer：建立/核准回覆後把 reply.requested 推進佇列（實作為 *queue.Queue）
+type enqueuer interface {
+	PublishReplyRequested(ctx context.Context, replyID string) error
 }
 
 type server struct {
 	st     apiStore
+	q      enqueuer
 	log    *slog.Logger
 	secret []byte
 }
@@ -53,6 +63,10 @@ func (s *server) routes() http.Handler {
 	mux.Handle("GET /api/v1/pipeline", s.auth(s.pipeline))
 	mux.Handle("GET /api/v1/cases/{id}", s.auth(s.caseDetail))
 	mux.Handle("PATCH /api/v1/cases/{id}/status", s.auth(s.updateStatus))
+	mux.Handle("POST /api/v1/cases/{id}/replies", s.auth(s.createReply))
+	mux.Handle("GET /api/v1/approvals", s.auth(s.approvals))
+	mux.Handle("POST /api/v1/replies/{id}/approve", s.auth(s.approveReply))
+	mux.Handle("POST /api/v1/replies/{id}/reject", s.auth(s.rejectReply))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	return mux
 }
@@ -197,6 +211,91 @@ func (s *server) updateStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": in.Status})
 }
 
+func (s *server) createReply(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&in); err != nil ||
+		len(in.Content) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "content required"})
+		return
+	}
+	email, _ := r.Context().Value(userKey).(string)
+	reply, enqueue, err := s.st.CreateReply(r.Context(), r.PathValue("id"), in.Content, email)
+	switch {
+	case errors.Is(err, store.ErrReplyNotAllowed):
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "此來源不支援回覆"})
+		return
+	case errors.Is(err, store.ErrReplyTooLong):
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "回覆內容過長"})
+		return
+	case errors.Is(err, store.ErrCaseNotFound):
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "case not found"})
+		return
+	case err != nil:
+		s.log.Error("create reply failed", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		return
+	}
+	if enqueue {
+		if err := s.q.PublishReplyRequested(r.Context(), reply.ID); err != nil {
+			// 已寫入 DB（approved），發送失敗不擋使用者；worker 另有 approved 掃描補送（M-later）
+			s.log.Error("enqueue reply failed", "reply_id", reply.ID, "err", err)
+		}
+	}
+	s.log.Info("reply created", "reply_id", reply.ID, "status", reply.Status, "by", email)
+	writeJSON(w, http.StatusCreated, reply)
+}
+
+func (s *server) approvals(w http.ResponseWriter, r *http.Request) {
+	list, err := s.st.PendingApprovals(r.Context(), 100)
+	if err != nil {
+		s.log.Error("approvals failed", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"replies": list})
+}
+
+func (s *server) approveReply(w http.ResponseWriter, r *http.Request) {
+	email, _ := r.Context().Value(userKey).(string)
+	ok, err := s.st.ApproveReply(r.Context(), r.PathValue("id"), email)
+	if errors.Is(err, store.ErrReplyBadState) || (err == nil && !ok) {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "此回覆不在待審狀態"})
+		return
+	}
+	if err != nil {
+		s.log.Error("approve reply failed", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		return
+	}
+	if err := s.q.PublishReplyRequested(r.Context(), r.PathValue("id")); err != nil {
+		s.log.Error("enqueue reply failed", "reply_id", r.PathValue("id"), "err", err)
+	}
+	s.log.Info("reply approved", "reply_id", r.PathValue("id"), "by", email)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "approved"})
+}
+
+func (s *server) rejectReply(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Reason string `json:"reason"`
+	}
+	_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<14)).Decode(&in)
+	email, _ := r.Context().Value(userKey).(string)
+	err := s.st.RejectReply(r.Context(), r.PathValue("id"), email, in.Reason)
+	if errors.Is(err, store.ErrReplyBadState) {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "此回覆不在待審狀態"})
+		return
+	}
+	if err != nil {
+		s.log.Error("reject reply failed", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		return
+	}
+	s.log.Info("reply rejected", "reply_id", r.PathValue("id"), "by", email)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "rejected"})
+}
+
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
@@ -212,7 +311,7 @@ func main() {
 	if secret == "dev_jwt_secret_change_me" {
 		log.Warn("JWT_SECRET not set: using dev default (fine for PoC, not for prod)")
 	}
-	s := &server{st: svc.Store, log: log, secret: []byte(secret)}
+	s := &server{st: svc.Store, q: svc.Queue, log: log, secret: []byte(secret)}
 
 	srv := &http.Server{Addr: ":" + envutil.Or("PORT", "8070"), Handler: s.routes()}
 	go func() {

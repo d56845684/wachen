@@ -143,6 +143,20 @@ services:
       nats:
         condition: service_started
 
+  replier:
+    restart: unless-stopped
+    image: wachen-crawler
+    container_name: wachen-replier
+    command: ["/bin/replier"]
+    environment:
+      DATABASE_URL: postgres://app_user:app_dev_password@postgres:5432/wachen?sslmode=disable
+      NATS_URL: nats://nats:4222
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_started
+
   api:
     restart: unless-stopped
     image: wachen-crawler
