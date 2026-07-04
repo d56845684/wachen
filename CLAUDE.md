@@ -7,7 +7,7 @@
 - Go 單元測試：`make test`（Docker 內跑，不需本機 Go）
 - Python 測試：`make test-python`（uv + pytest，Docker 內跑）
 - 整合測試：`make test-integration`（需先 `make up`，打 compose 裡的真 PG）
-- E2E 驗收：`make verify`（M1-M4 全部，各腳本可單獨跑且可重複執行）
+- E2E 迴歸：`make verify`（tests/e2e/，M1-M7，各腳本可單獨跑且可重複執行；M2/M3 自建 mock 測完即砍）
 - Python 套件管理用 uv（改 `analyzer/pyproject.toml` 後跑 `make uv-lock`）
 
 ## Skill routing

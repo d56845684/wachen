@@ -60,11 +60,11 @@ db-dump:       ## 匯出整個 DB 到 backups/（遷移到別的環境用）
 db-restore:    ## 還原 dump 到目標環境：make db-restore DUMP=backups/xxx.dump TARGET_DATABASE_URL=...
 	bash scripts/db_restore.sh $(DUMP)
 
-verify:        ## 全部驗收：M1 audit + M2 抓取 + M3 ingestion + M4 AI + M5 分流 + M6 後台
-	bash scripts/verify_m1.sh
-	bash scripts/verify_m2.sh
-	bash scripts/verify_m3.sh
-	bash scripts/verify_m4.sh
-	bash scripts/verify_m5.sh
-	bash scripts/verify_m6.sh
-	bash scripts/verify_m7.sh
+verify:        ## E2E 迴歸（tests/e2e/）：M1 audit + M2 抓取 + M3 ingestion + M4 AI + M5 分流 + M6 後台 + M7 回覆
+	bash tests/e2e/verify_m1.sh
+	bash tests/e2e/verify_m2.sh
+	bash tests/e2e/verify_m3.sh
+	bash tests/e2e/verify_m4.sh
+	bash tests/e2e/verify_m5.sh
+	bash tests/e2e/verify_m6.sh
+	bash tests/e2e/verify_m7.sh
