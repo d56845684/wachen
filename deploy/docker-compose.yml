@@ -166,6 +166,8 @@ services:
       DATABASE_URL: postgres://app_user:app_dev_password@postgres:5432/wachen?sslmode=disable
       NATS_URL: nats://nats:4222
       JWT_SECRET: ${JWT_SECRET:-dev_jwt_secret_change_me}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       PORT: "8070"
     # 不對外：唯一入口是 web(nginx) 的 /api/ 反向代理
     depends_on:

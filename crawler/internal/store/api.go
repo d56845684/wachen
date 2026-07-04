@@ -18,6 +18,20 @@ type AuthedUser struct {
 	Role        string
 }
 
+// EnsureAdmin：以環境變數提供的帳密建立/更新管理員（API 啟動時呼叫）。
+// 密碼永不進版控——bcrypt 由 pgcrypto crypt(+gen_salt('bf')) 產生。冪等。
+func (s *Store) EnsureAdmin(ctx context.Context, email, password string) error {
+	return s.withTx(ctx, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `
+			INSERT INTO users (email, display_name, role, password_hash, is_active, created_by, updated_by)
+			VALUES ($1, '系統管理員', 'admin', crypt($2, gen_salt('bf')), true, current_actor(), current_actor())
+			ON CONFLICT (email) DO UPDATE SET
+			    password_hash = crypt($2, gen_salt('bf')),
+			    is_active = true`, email, password)
+		return err
+	})
+}
+
 // AuthUser 帳密驗證：bcrypt 比對走 pgcrypto crypt()，常數時間由 bcrypt 本身保證
 func (s *Store) AuthUser(ctx context.Context, email, password string) (*AuthedUser, error) {
 	var u AuthedUser

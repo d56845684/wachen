@@ -312,6 +312,18 @@ func main() {
 	if secret == "dev_jwt_secret_change_me" {
 		log.Warn("JWT_SECRET not set: using dev default (fine for PoC, not for prod)")
 	}
+
+	// 管理員帳密由環境變數注入（不進版控、不寫死在 migration）
+	if email, pw := os.Getenv("ADMIN_EMAIL"), os.Getenv("ADMIN_PASSWORD"); email != "" && pw != "" {
+		if err := svc.Store.EnsureAdmin(ctx, email, pw); err != nil {
+			log.Error("provision admin failed", "err", err)
+			os.Exit(1)
+		}
+		log.Info("admin provisioned from env", "email", email)
+	} else {
+		log.Warn("ADMIN_EMAIL/ADMIN_PASSWORD not set: no admin account provisioned; login disabled")
+	}
+
 	s := &server{st: svc.Store, q: svc.Queue, log: log, secret: []byte(secret)}
 
 	srv := &http.Server{Addr: ":" + envutil.Or("PORT", "8070"), Handler: s.routes()}

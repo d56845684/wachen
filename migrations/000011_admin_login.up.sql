@@ -1,12 +1,10 @@
 -- =============================================================
--- 000011: M6 後台登入（PoC：帳密認證，無 RBAC）
---   預設帳號 admin@example.com / Wachen!2026
---   bcrypt 由 pgcrypto 的 crypt(+gen_salt('bf')) 產生與驗證——
---   Go 端零新密碼學依賴，驗證走 SQL：password_hash = crypt($pw, password_hash)
+-- 000011: M6 後台登入
+--   管理員帳密不再寫死在 migration——改由 API 服務啟動時以環境變數
+--   ADMIN_EMAIL / ADMIN_PASSWORD 建立/更新（見 cmd/api EnsureAdmin）。
+--   密碼永不進版控；bcrypt 由 pgcrypto crypt(+gen_salt('bf')) 產生。
+--   （管理員 user 列本身由 000005 種下，此處刻意不設密碼）
 -- =============================================================
 
 SET app.current_actor = 'svc:migration';
-
-UPDATE users
-SET password_hash = crypt('Wachen!2026', gen_salt('bf'))
-WHERE email = 'admin@example.com';
+-- no-op：保留遷移編號連續，實際帳密由 API 從環境變數注入
