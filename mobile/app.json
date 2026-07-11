@@ -1,0 +1,15 @@
+{
+  "expo": {
+    "name": "瓦城顧客體驗中台",
+    "slug": "wacity-cx-mobile",
+    "scheme": "wacity",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": { "supportsTablet": true, "bundleIdentifier": "ai.ikala.wacity.cx" },
+    "android": { "package": "ai.ikala.wacity.cx" },
+    "plugins": ["expo-router"],
+    "experiments": { "typedRoutes": true }
+  }
+}

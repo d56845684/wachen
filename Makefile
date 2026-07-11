@@ -3,7 +3,7 @@ COMPOSE = docker compose -f deploy/docker-compose.yml
 # 正式/遠端服務：排除 mock 三件（mockgoogle/scheduler/worker）與 adminer（DB debug UI，不曝生產）
 PROD_SERVICES = postgres nats migrate ingestion webhook routing replier analyzer api web
 
-.PHONY: up up-prod down clean migrate migrate-down psql nats-check verify test test-integration crawl-wacheng
+.PHONY: up up-prod down clean migrate migrate-down psql nats-check verify test test-integration crawl-wacheng mobile
 
 test:          ## 單元測試（Docker 內跑，不需本機 Go）
 	docker run --rm -v $(PWD)/backend:/src -v wachen-gomod:/go/pkg/mod -w /src \
@@ -50,6 +50,13 @@ psql:          ## 進入 psql
 
 tunnel:        ## Cloudflare Tunnel（HTTPS 對外分享後台）：make tunnel ARGS=start|stop|check
 	bash scripts/tunnel.sh $(or $(ARGS),check)
+
+mobile:        ## 啟動 Expo dev server；EXPO_PUBLIC_API_URL 取自 deploy/.env（留空 → 內建 mock），可 make mobile EXPO_PUBLIC_API_URL=... 覆寫
+	@url='$(EXPO_PUBLIC_API_URL)'; \
+	[ -n "$$url" ] || url=$$(grep -E '^EXPO_PUBLIC_API_URL=' deploy/.env 2>/dev/null | tail -1 | cut -d= -f2-); \
+	if [ -n "$$url" ]; then echo "EXPO_PUBLIC_API_URL=$$url（串真後端）"; \
+	else echo "EXPO_PUBLIC_API_URL 未設定（deploy/.env）：走內建 mock 離線 demo"; fi; \
+	cd mobile && EXPO_PUBLIC_API_URL="$$url" npm start
 
 nats-check:    ## 檢查 NATS JetStream 狀態（port 不對外，容器內查）
 	$(COMPOSE) exec -T nats wget -qO- http://localhost:8222/jsz
