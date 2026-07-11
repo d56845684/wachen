@@ -67,7 +67,7 @@ export default function CaseDetailPage() {
 
   return (
     <div className="page">
-      <Link className="back" to="/">← 返回收件匣</Link>
+      <Link className="back" to="/inbox">← 返回即時案件</Link>
 
       <div className="detail-head">
         <RiskSeal risk={d.risk_level} />
@@ -136,7 +136,7 @@ export default function CaseDetailPage() {
                   rows={3}
                 />
                 <div className="reply-actions">
-                  {d.risk_level === "high" && <span className="reply-hint">⚠ 高風險：送出後進審核佇列</span>}
+                  {d.risk_level === "high" && <span className="reply-hint">高風險：送出後進審核佇列</span>}
                   <button className="btn-action send" disabled={sending || !replyText.trim()}>
                     {sending ? "送出中…" : d.risk_level === "high" ? "送審" : "送出回覆"}
                   </button>
@@ -177,7 +177,7 @@ export default function CaseDetailPage() {
             </div>
             <div className="kv" style={{ margin: "12px 0" }}>
               {d.categories.map((c) => <span key={c} className="tag">{c}</span>)}
-              {d.keywords.map((k) => <span key={k} className="tag">🔑 {k}</span>)}
+              {d.keywords.map((k) => <span key={k} className="tag">{k}</span>)}
             </div>
             {d.risk_reasons.length > 0 && (
               <ul className="reasons">

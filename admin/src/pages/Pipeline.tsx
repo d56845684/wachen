@@ -120,7 +120,7 @@ export default function Pipeline() {
                 <div className="rec-meta">
                   <strong>{r.store_name || "未對映門市"}</strong>
                   <span>{r.source_name}</span>
-                  <span className="rec-model">{r.model_name}{r.fallback && " ⚠ 降級"}</span>
+                  <span className="rec-model">{r.model_name}{r.fallback && " 降級"}</span>
                   {r.latency_ms != null && <span className="rec-lat">{r.latency_ms}ms</span>}
                   <span className="rec-time">{new Date(r.created_at).toLocaleTimeString("zh-TW")}</span>
                 </div>
