@@ -24,3 +24,4 @@ scripts/.wacheng_stores.json
 scripts/wacheng_stores.generated.sql
 scripts/.debug_maps*.png
 admin/package-lock.json
+.claude

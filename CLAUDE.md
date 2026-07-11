@@ -17,6 +17,7 @@ tool as your FIRST action. Do NOT answer directly, do NOT use other tools first.
 The skill has specialized workflows that produce better results than ad-hoc answers.
 
 Key routing rules:
+- UI/UX（動畫、easing、按壓回饋、互動細節）→ invoke emil-design-eng（web 與 mobile 皆是；motion tokens 見 mobile/src/theme/motion.ts 與各 CSS 的 --ease-* 變數）
 - Product ideas, "is this worth building", brainstorming → invoke office-hours
 - Bugs, errors, "why is this broken", 500 errors → invoke investigate
 - Ship, deploy, push, create PR → invoke ship
