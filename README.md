@@ -24,7 +24,7 @@ FB/IG(規劃)   ─┤     Webhook Gateway      正規化+版本化           Ge
 
 ---
 
-## 架構圖（正式環境對映）
+## 架構圖
 
 PoC 用 docker-compose 起全棧；上雲時的元件對映如下（兩版拓撲相同）。
 

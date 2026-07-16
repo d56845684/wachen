@@ -25,3 +25,5 @@ scripts/wacheng_stores.generated.sql
 scripts/.debug_maps*.png
 admin/package-lock.json
 .claude
+deploy/aws/.terraform/
+*.tfstate*
