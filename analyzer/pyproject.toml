@@ -7,6 +7,7 @@ dependencies = [
     "nats-py==2.7.2",
     "asyncpg==0.29.0",
     "httpx==0.27.0",
+    "boto3==1.40.68",
 ]
 
 [dependency-groups]

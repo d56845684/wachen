@@ -7,7 +7,7 @@ PROD_SERVICES = postgres nats migrate ingestion webhook routing replier analyzer
 
 test:          ## 單元測試（Docker 內跑，不需本機 Go）
 	docker run --rm -v $(PWD)/backend:/src -v wachen-gomod:/go/pkg/mod -w /src \
-		golang:1.22-alpine sh -c "go mod tidy && go test ./..."
+		golang:1.24-alpine sh -c "go mod tidy && go test ./..."
 
 test-python:   ## analyzer 測試（uv，Docker 內跑，不需本機 Python）
 	docker run --rm -v $(PWD)/analyzer:/app -v wachen-uv:/root/.cache/uv -w /app \
@@ -22,7 +22,7 @@ test-integration: ## store 整合測試（需先 make up，連 compose 網路打
 	docker run --rm -v $(PWD)/backend:/src -v wachen-gomod:/go/pkg/mod -w /src \
 		--network deploy_default \
 		-e TEST_DATABASE_URL="postgres://wachen:$${POSTGRES_PASSWORD:-wachen_dev}@postgres:5432/wachen?sslmode=disable" \
-		golang:1.22-alpine sh -c "go mod tidy && go test -v -run Integration ./internal/store/"
+		golang:1.24-alpine sh -c "go mod tidy && go test -v -run Integration ./internal/store/"
 
 up:            ## 啟動全部服務（含 mock，開發用）
 	$(COMPOSE) up -d

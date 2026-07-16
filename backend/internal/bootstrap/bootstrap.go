@@ -18,7 +18,7 @@ type Service struct {
 	Ctx   context.Context
 	Log   *slog.Logger
 	Store *store.Store
-	Queue *queue.Queue
+	Queue queue.Queue
 	stop  context.CancelFunc
 }
 
@@ -33,9 +33,9 @@ func MustInit(svcName, actor string) *Service {
 		log.Error("db connect failed", "err", err)
 		os.Exit(1)
 	}
-	q, err := queue.New(ctx, envutil.Must("NATS_URL"))
+	q, err := queue.NewFromEnv(ctx)
 	if err != nil {
-		log.Error("nats connect failed", "err", err)
+		log.Error("queue connect failed", "err", err)
 		os.Exit(1)
 	}
 	if err := q.EnsureStreams(ctx); err != nil {

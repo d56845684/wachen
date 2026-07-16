@@ -73,7 +73,7 @@ func acquireLeadership(ctx context.Context, log *slog.Logger, st *store.Store) *
 }
 
 // leadLoop：每 tick = 心跳驗鎖 → reap 孤兒任務 → 派工。心跳失敗即返回退位。
-func leadLoop(ctx context.Context, log *slog.Logger, st *store.Store, q *queue.Queue,
+func leadLoop(ctx context.Context, log *slog.Logger, st *store.Store, q queue.Queue,
 	parser cron.Parser, lock *store.LeaderLock) {
 
 	tick := time.NewTicker(10 * time.Second)
@@ -99,7 +99,7 @@ func leadLoop(ctx context.Context, log *slog.Logger, st *store.Store, q *queue.Q
 }
 
 // scheduleDue：單一 source 出錯只跳過該源（continue），不餓死其他來源
-func scheduleDue(ctx context.Context, log *slog.Logger, st *store.Store, q *queue.Queue, parser cron.Parser) {
+func scheduleDue(ctx context.Context, log *slog.Logger, st *store.Store, q queue.Queue, parser cron.Parser) {
 	sources, err := st.EnabledSources(ctx)
 	if err != nil {
 		log.Error("list sources failed", "err", err)
@@ -120,7 +120,7 @@ func scheduleDue(ctx context.Context, log *slog.Logger, st *store.Store, q *queu
 	}
 }
 
-func scheduleOne(ctx context.Context, st *store.Store, q *queue.Queue,
+func scheduleOne(ctx context.Context, st *store.Store, q queue.Queue,
 	src store.Source, loc string, sched cron.Schedule, now time.Time) error {
 
 	open, err := st.HasOpenJob(ctx, src.ID, loc)

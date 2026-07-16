@@ -34,6 +34,63 @@ from nats.js.api import AckPolicy, ConsumerConfig
 
 import pipeline
 
+# --- SQS 事件層（QUEUE_DRIVER=sqs 時啟用；語意對映見 backend/internal/queue/sqs.go） ---
+
+
+class SqsMsg:
+    """把 SQS 訊息包成 nats msg 介面（data / metadata.num_delivered / ack / nak / term）。"""
+
+    def __init__(self, bus: "SqsBus", raw: dict):
+        self._bus = bus
+        self.data = raw["Body"].encode()
+        self._handle = raw["ReceiptHandle"]
+        attempts = int(raw.get("Attributes", {}).get("ApproximateReceiveCount", "1"))
+        self.metadata = type("Meta", (), {"num_delivered": attempts})()
+
+    async def ack(self):
+        await asyncio.to_thread(
+            self._bus.sqs.delete_message,
+            QueueUrl=self._bus.created_url, ReceiptHandle=self._handle,
+        )
+
+    async def nak(self, delay: int = 0):
+        await asyncio.to_thread(
+            self._bus.sqs.change_message_visibility,
+            QueueUrl=self._bus.created_url, ReceiptHandle=self._handle,
+            VisibilityTimeout=int(delay),
+        )
+
+    async def term(self):
+        # 立即釋放，燒完 redrive maxReceiveCount 後進 DLQ 供人工檢視
+        await self.nak(0)
+
+
+class SqsBus:
+    """同時扮演 consumer（fetch review.created）與 publisher（js.publish 介面）。"""
+
+    def __init__(self):
+        import boto3  # 延遲載入：NATS 模式不需要
+
+        self.sqs = boto3.client("sqs")
+        self.created_url = os.environ["SQS_REVIEW_CREATED_URL"]
+        self.analyzed_url = os.environ["SQS_REVIEW_ANALYZED_URL"]
+
+    async def publish(self, subject: str, data: bytes):
+        assert subject == "review.analyzed", subject
+        await asyncio.to_thread(
+            self.sqs.send_message, QueueUrl=self.analyzed_url, MessageBody=data.decode()
+        )
+
+    async def fetch(self, n: int, timeout: int) -> list[SqsMsg]:
+        resp = await asyncio.to_thread(
+            self.sqs.receive_message,
+            QueueUrl=self.created_url,
+            MaxNumberOfMessages=n,
+            WaitTimeSeconds=timeout,
+            AttributeNames=["ApproximateReceiveCount"],
+        )
+        return [SqsMsg(self, m) for m in resp.get("Messages", [])]
+
 MAX_DELIVER = 4
 ACTOR = "svc:analyzer"
 
@@ -190,22 +247,34 @@ async def handle(pool, js, msg) -> None:
 
 async def main() -> None:
     pool = await asyncpg.create_pool(os.environ["DATABASE_URL"], min_size=1, max_size=4)
-    nc = await nats.connect(os.environ["NATS_URL"], max_reconnect_attempts=-1)
-    js = nc.jetstream()
-    sub = await js.pull_subscribe(
-        "review.created",
-        durable="analysis",
-        stream="REVIEWS",
-        config=ConsumerConfig(
-            ack_policy=AckPolicy.EXPLICIT,
-            # 批次循序處理的最壞情況必須 < ack_wait：
-            # fetch(4) × 60s httpx timeout = 240s < 300s，
-            # 否則排在後面的訊息還沒被碰就過期重投（白燒配額 + 白吃 max_deliver）
-            ack_wait=300,
-            max_deliver=MAX_DELIVER,
-            filter_subject="review.created",
-        ),
-    )
+    driver = os.environ.get("QUEUE_DRIVER", "nats")
+    if driver == "sqs":
+        nc = None
+        js = SqsBus()  # SQS visibility timeout 由 Terraform 設 300s，同 ack_wait 邏輯
+        fetch = js.fetch
+    else:
+        nc = await nats.connect(os.environ["NATS_URL"], max_reconnect_attempts=-1)
+        js = nc.jetstream()
+        sub = await js.pull_subscribe(
+            "review.created",
+            durable="analysis",
+            stream="REVIEWS",
+            config=ConsumerConfig(
+                ack_policy=AckPolicy.EXPLICIT,
+                # 批次循序處理的最壞情況必須 < ack_wait：
+                # fetch(4) × 60s httpx timeout = 240s < 300s，
+                # 否則排在後面的訊息還沒被碰就過期重投（白燒配額 + 白吃 max_deliver）
+                ack_wait=300,
+                max_deliver=MAX_DELIVER,
+                filter_subject="review.created",
+            ),
+        )
+
+        async def fetch(n: int, timeout: int):
+            try:
+                return await sub.fetch(n, timeout=timeout)
+            except nats.errors.TimeoutError:
+                return []
 
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -218,15 +287,12 @@ async def main() -> None:
     jlog(logging.INFO, "analyzer started", provider=pipeline.provider_name(),
          model="/".join(pipeline.model_info()), prompt_version=pipeline.PROMPT_VERSION)
     while not stop.is_set():
-        try:
-            msgs = await sub.fetch(4, timeout=5)
-        except nats.errors.TimeoutError:
-            continue
-        for msg in msgs:
+        for msg in await fetch(4, timeout=5):
             await handle(pool, js, msg)
 
     jlog(logging.INFO, "shutting down")
-    await nc.drain()
+    if nc is not None:
+        await nc.drain()
     await pool.close()
 
 
