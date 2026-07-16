@@ -57,9 +57,9 @@ PoC 用 docker-compose 起全棧；上雲時的元件對映如下（兩版拓撲
 | 爬蟲 + 後端服務 | **Go**（scheduler / worker / ingestion / webhook / routing / replier / api） |
 | AI 輿情分析 | **Python 3.12**（uv 管理），供應商插件：`GEMINI_API_KEY` → Gemini，未設 → heuristic fallback |
 | 資料庫 | **PostgreSQL 16**（完整稽核欄位 + trigger 自動留痕 + append-only 原始資料） |
-| 訊息佇列 | **NATS JetStream**（事件驅動、consumer group 分散、持久化 + 重試 + 對帳兜底） |
+| 訊息佇列 | **NATS JetStream**（PoC 預設）/ **AWS SQS**（`QUEUE_DRIVER=sqs`，同一套事件語意：重試退避 + DLQ） |
 | 後台 | **React + Vite + TypeScript**，**nginx** 出面（靜態 SPA + `/api` 反向代理） |
-| 部署 | **docker-compose**（PoC）；服務間走內部網路，僅後台對外 |
+| 部署 | **docker-compose**（PoC，服務間走內部網路僅後台對外）；**AWS Terraform**（`deploy/aws/`，見下） |
 
 ---
 
@@ -79,6 +79,22 @@ open http://localhost:8088
 ```
 
 想要 HTTPS 對外分享 demo：`scripts/tunnel.sh start`（Cloudflare Tunnel）。
+
+### AWS 部署（Terraform，本機免裝 tf）
+
+`deploy/aws/` 一套 code 三環境（`envs/{dev,stg,prod}.tfvars`），對映上方 AWS 架構圖：
+ECS Fargate（無狀態服務）+ EC2 Spot（爬蟲）+ SQS（含 DLQ）+ RDS + Route 53/ALB + Bedrock IAM。
+
+```bash
+cd deploy/aws
+alias tf='docker run --rm -v "$PWD":/work -w /work \
+  -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY hashicorp/terraform:1.9'
+tf init -backend-config="bucket=<state-bucket>" -backend-config="key=wachen/dev.tfstate"
+tf apply -var-file=envs/dev.tfvars
+```
+
+前置：tfvars 換上自家網域/hosted zone（有 TODO 標記）、image 先推 ECR。
+服務的 `QUEUE_DRIVER=sqs` 與各佇列 URL 由 Terraform 自動注入（ecs.tf / ec2.tf），不用手填。
 
 ---
 
@@ -121,7 +137,7 @@ backend/          Go：爬蟲 + 後端服務 + 後台 API（cmd/ 下每個服務
 analyzer/         Python：AI 分析 worker（pipeline: gemini / heuristic / risk）
 admin/            React 後台（nginx + SPA）
 migrations/       PostgreSQL migrations（含 audit trigger）
-deploy/           docker-compose + .env
+deploy/           docker-compose + .env；aws/ = Terraform（三環境）
 scripts/          維運工具（tunnel / cleanup_db / crawl…）
 tests/e2e/        端到端迴歸（verify_m1–m7）
 docs/             ARCHITECTURE.md / google-setup.md
