@@ -2,6 +2,8 @@
 # M6 驗收：後台（nginx + SPA + API）——登入、案件、狀態變更、稽核 actor
 set -uo pipefail
 source "$(dirname "$0")/lib.sh"
+trap mock_teardown EXIT   # 測完（含失敗）一定砍掉 mock
+mock_setup
 
 # 一律走 nginx（後台唯一入口）；從內部網路打 http://web/
 WCURL="$COMPOSE exec -T webhook curl -s"
@@ -36,6 +38,15 @@ if [ -n "$TOKEN" ]; then check "預設帳號登入取得 token" "ok" "ok"; else 
 
 noauth=$($WCURL -o /dev/null -w '%{http_code}' "$BASE/api/v1/cases")
 check "無 token 拒絕（401）" "401" "$noauth"
+
+echo "== 等待 mock 管線生成案件（爬取 → 分析 → 分流）=="
+deadline=$((SECONDS + 240))
+while [ $SECONDS -lt $deadline ]; do
+    cases=$($PSQL "SELECT count(*) FROM cases")
+    echo "  ... cases=$cases"
+    [ "${cases:-0}" -ge 8 ] && break
+    sleep 15
+done
 
 echo "== 3. 案件收件匣 =="
 LIST=$($WCURL -H "Authorization: Bearer $TOKEN" "$BASE/api/v1/cases")

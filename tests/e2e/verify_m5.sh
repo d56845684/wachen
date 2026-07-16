@@ -2,14 +2,18 @@
 # M5 驗收：Routing Engine（分流/指派/SLA/通知）+ case.created 事件
 set -uo pipefail
 source "$(dirname "$0")/lib.sh"
+trap mock_teardown EXIT   # 測完（含失敗）一定砍掉 mock
+mock_setup
 
 echo "== 等待 routing 消化 review.analyzed backlog =="
 deadline=$((SECONDS + 240))
 while [ $SECONDS -lt $deadline ]; do
     cases=$($PSQL "SELECT count(*) FROM cases")
     sent=$($PSQL "SELECT count(*) FROM notifications WHERE status = 'sent'")
-    echo "  ... cases=$cases sent_notifications=$sent"
-    if [ "${cases:-0}" -ge 8 ] && [ "${sent:-0}" -ge 8 ]; then
+    # 食安高風險樣本可能比一般樣本晚進管線，等到有 high 案件才開始驗證
+    high=$($PSQL "SELECT count(*) FROM cases WHERE risk_level = 'high'")
+    echo "  ... cases=$cases sent_notifications=$sent high_cases=$high"
+    if [ "${cases:-0}" -ge 8 ] && [ "${sent:-0}" -ge 8 ] && [ "${high:-0}" -ge 1 ]; then
         break
     fi
     sleep 15

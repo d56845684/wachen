@@ -2,6 +2,8 @@
 # M4 驗收：AI 分析管線（review.created → analysis_results → review.analyzed）
 set -uo pipefail
 source "$(dirname "$0")/lib.sh"
+trap mock_teardown EXIT   # 測完（含失敗）一定砍掉 mock
+mock_setup
 
 echo "== 等待 analyzer 消化管線（含重放 backlog 與編輯觸發的重分析）=="
 deadline=$((SECONDS + 240))
