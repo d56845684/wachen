@@ -24,6 +24,32 @@ FB/IG(規劃)   ─┤     Webhook Gateway      正規化+版本化           Ge
 
 ---
 
+## 架構圖（正式環境對映）
+
+PoC 用 docker-compose 起全棧；上雲時的元件對映如下（兩版拓撲相同）。
+
+### GCP
+
+![GCP 架構圖](docs/architecture-gcp.png)
+
+### AWS
+
+![AWS 架構圖](docs/architecture-aws.png)
+
+| 元件 | PoC | GCP | AWS |
+|---|---|---|---|
+| 排程器 | scheduler（Go） | Cloud Scheduler | EventBridge Scheduler |
+| 爬蟲 / 留言回覆 | worker / replier | GCE VM | EC2 |
+| 其餘服務 | 各 Go/Python 容器 | Cloud Run | ECS Fargate |
+| 事件層 | NATS JetStream | Pub/Sub | SQS |
+| 資料庫 | PostgreSQL 16 | Cloud SQL | RDS |
+| LLM | Gemini API | Vertex AI | Bedrock |
+| 對外入口 | Cloudflare Tunnel | Cloud DNS + LB | Route 53 + ELB |
+
+重新產圖：`uv run --with diagrams scripts/architecture_diagram.py`（需 `brew install graphviz`）。
+
+---
+
 ## 技術棧
 
 | 層 | 選型 |
