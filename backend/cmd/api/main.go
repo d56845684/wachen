@@ -6,6 +6,7 @@
 //	GET   /api/v1/cases/{id}                           （Bearer）
 //	PATCH /api/v1/cases/{id}/status  {status}          （Bearer；稽核 actor = user:<email>）
 //
+// 本套件只做 transport（JSON/JWT/HTTP 狀態碼）；業務邏輯在 internal/service。
 // 對外只經 nginx（/api/ 反向代理），本服務不曝露 port。
 package main
 
@@ -23,30 +24,12 @@ import (
 
 	"github.com/ikala/wachen/backend/internal/bootstrap"
 	"github.com/ikala/wachen/backend/internal/envutil"
+	"github.com/ikala/wachen/backend/internal/service"
 	"github.com/ikala/wachen/backend/internal/store"
 )
 
-type apiStore interface {
-	AuthUser(ctx context.Context, email, password string) (*store.AuthedUser, error)
-	ListCases(ctx context.Context, f store.CaseFilter) ([]store.CaseSummary, error)
-	CaseFacets(ctx context.Context) (stores, sources []store.Facet, err error)
-	GetPipelineStats(ctx context.Context) (*store.PipelineStats, error)
-	GetCaseDetail(ctx context.Context, caseID string) (*store.CaseDetail, error)
-	UpdateCaseStatus(ctx context.Context, caseID, newStatus, actor string) error
-	CreateReply(ctx context.Context, caseID, content, authorEmail string) (*store.Reply, bool, error)
-	ApproveReply(ctx context.Context, replyID, approverEmail string) (bool, error)
-	RejectReply(ctx context.Context, replyID, approverEmail, reason string) error
-	PendingApprovals(ctx context.Context, limit int) ([]store.PendingReply, error)
-}
-
-// enqueuer：建立/核准回覆後把 reply.requested 推進佇列（實作為 *queue.Queue）
-type enqueuer interface {
-	PublishReplyRequested(ctx context.Context, replyID string) error
-}
-
 type server struct {
-	st     apiStore
-	q      enqueuer
+	svc    *service.Service
 	log    *slog.Logger
 	secret []byte
 }
@@ -81,7 +64,7 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "email and password required"})
 		return
 	}
-	u, err := s.st.AuthUser(r.Context(), in.Email, in.Password)
+	u, err := s.svc.Login(r.Context(), in.Email, in.Password)
 	if err != nil {
 		s.log.Error("auth query failed", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
@@ -132,28 +115,24 @@ func (s *server) auth(next http.HandlerFunc) http.Handler {
 
 func (s *server) listCases(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	cases, err := s.st.ListCases(r.Context(), store.CaseFilter{
+	cases, err := s.svc.ListCases(r.Context(), store.CaseFilter{
 		Risk:   q.Get("risk"),
 		Status: q.Get("status"),
 		Store:  q.Get("store"),
 		Source: q.Get("source"),
 		Rating: q.Get("rating"),
 		Sort:   q.Get("sort"),
-		Limit:  200,
 	})
 	if err != nil {
 		s.log.Error("list cases failed", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
 		return
 	}
-	if cases == nil {
-		cases = []store.CaseSummary{}
-	}
 	writeJSON(w, http.StatusOK, map[string]any{"cases": cases})
 }
 
 func (s *server) facets(w http.ResponseWriter, r *http.Request) {
-	stores, sources, err := s.st.CaseFacets(r.Context())
+	stores, sources, err := s.svc.CaseFacets(r.Context())
 	if err != nil {
 		s.log.Error("facets failed", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
@@ -163,7 +142,7 @@ func (s *server) facets(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) pipeline(w http.ResponseWriter, r *http.Request) {
-	stats, err := s.st.GetPipelineStats(r.Context())
+	stats, err := s.svc.PipelineStats(r.Context())
 	if err != nil {
 		s.log.Error("pipeline stats failed", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
@@ -173,7 +152,7 @@ func (s *server) pipeline(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) caseDetail(w http.ResponseWriter, r *http.Request) {
-	d, err := s.st.GetCaseDetail(r.Context(), r.PathValue("id"))
+	d, err := s.svc.CaseDetail(r.Context(), r.PathValue("id"))
 	if err != nil {
 		s.log.Error("case detail failed", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
@@ -186,20 +165,20 @@ func (s *server) caseDetail(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, d)
 }
 
-var allowedStatuses = map[string]bool{"open": true, "in_progress": true, "resolved": true, "closed": true}
-
 func (s *server) updateStatus(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Status string `json:"status"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<12)).Decode(&in); err != nil ||
-		!allowedStatuses[in.Status] {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<12)).Decode(&in); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "status must be one of open/in_progress/resolved/closed"})
 		return
 	}
 	email, _ := r.Context().Value(userKey).(string)
-	err := s.st.UpdateCaseStatus(r.Context(), r.PathValue("id"), in.Status, "user:"+email)
+	err := s.svc.UpdateCaseStatus(r.Context(), r.PathValue("id"), in.Status, email)
 	switch {
+	case errors.Is(err, service.ErrUnknownStatus):
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "status must be one of open/in_progress/resolved/closed"})
+		return
 	case errors.Is(err, store.ErrInvalidTransition):
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "此狀態不可轉換"})
 		return
@@ -208,7 +187,6 @@ func (s *server) updateStatus(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
 		return
 	}
-	s.log.Info("case status updated", "case", r.PathValue("id"), "status", in.Status, "by", email)
 	writeJSON(w, http.StatusOK, map[string]string{"status": in.Status})
 }
 
@@ -222,7 +200,7 @@ func (s *server) createReply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	email, _ := r.Context().Value(userKey).(string)
-	reply, enqueue, err := s.st.CreateReply(r.Context(), r.PathValue("id"), in.Content, email)
+	reply, err := s.svc.CreateReply(r.Context(), r.PathValue("id"), in.Content, email)
 	switch {
 	case errors.Is(err, store.ErrReplyNotAllowed):
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "此來源不支援回覆"})
@@ -238,18 +216,11 @@ func (s *server) createReply(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
 		return
 	}
-	if enqueue {
-		if err := s.q.PublishReplyRequested(r.Context(), reply.ID); err != nil {
-			// 已寫入 DB（approved），發送失敗不擋使用者；worker 另有 approved 掃描補送（M-later）
-			s.log.Error("enqueue reply failed", "reply_id", reply.ID, "err", err)
-		}
-	}
-	s.log.Info("reply created", "reply_id", reply.ID, "status", reply.Status, "by", email)
 	writeJSON(w, http.StatusCreated, reply)
 }
 
 func (s *server) approvals(w http.ResponseWriter, r *http.Request) {
-	list, err := s.st.PendingApprovals(r.Context(), 100)
+	list, err := s.svc.PendingApprovals(r.Context())
 	if err != nil {
 		s.log.Error("approvals failed", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
@@ -260,20 +231,16 @@ func (s *server) approvals(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) approveReply(w http.ResponseWriter, r *http.Request) {
 	email, _ := r.Context().Value(userKey).(string)
-	ok, err := s.st.ApproveReply(r.Context(), r.PathValue("id"), email)
-	if errors.Is(err, store.ErrReplyBadState) || (err == nil && !ok) {
+	err := s.svc.ApproveReply(r.Context(), r.PathValue("id"), email)
+	switch {
+	case errors.Is(err, store.ErrReplyBadState):
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "此回覆不在待審狀態"})
 		return
-	}
-	if err != nil {
+	case err != nil:
 		s.log.Error("approve reply failed", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
 		return
 	}
-	if err := s.q.PublishReplyRequested(r.Context(), r.PathValue("id")); err != nil {
-		s.log.Error("enqueue reply failed", "reply_id", r.PathValue("id"), "err", err)
-	}
-	s.log.Info("reply approved", "reply_id", r.PathValue("id"), "by", email)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "approved"})
 }
 
@@ -283,17 +250,16 @@ func (s *server) rejectReply(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<14)).Decode(&in)
 	email, _ := r.Context().Value(userKey).(string)
-	err := s.st.RejectReply(r.Context(), r.PathValue("id"), email, in.Reason)
-	if errors.Is(err, store.ErrReplyBadState) {
+	err := s.svc.RejectReply(r.Context(), r.PathValue("id"), email, in.Reason)
+	switch {
+	case errors.Is(err, store.ErrReplyBadState):
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "此回覆不在待審狀態"})
 		return
-	}
-	if err != nil {
+	case err != nil:
 		s.log.Error("reject reply failed", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
 		return
 	}
-	s.log.Info("reply rejected", "reply_id", r.PathValue("id"), "by", email)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "rejected"})
 }
 
@@ -304,9 +270,9 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 }
 
 func main() {
-	svc := bootstrap.MustInit("api", "svc:api")
-	defer svc.Close()
-	ctx, log := svc.Ctx, svc.Log
+	boot := bootstrap.MustInit("api", "svc:api")
+	defer boot.Close()
+	ctx, log := boot.Ctx, boot.Log
 
 	secret := envutil.Or("JWT_SECRET", "dev_jwt_secret_change_me")
 	if secret == "dev_jwt_secret_change_me" {
@@ -315,7 +281,7 @@ func main() {
 
 	// 管理員帳密由環境變數注入（不進版控、不寫死在 migration）
 	if email, pw := os.Getenv("ADMIN_EMAIL"), os.Getenv("ADMIN_PASSWORD"); email != "" && pw != "" {
-		if err := svc.Store.EnsureAdmin(ctx, email, pw); err != nil {
+		if err := boot.Store.EnsureAdmin(ctx, email, pw); err != nil {
 			log.Error("provision admin failed", "err", err)
 			os.Exit(1)
 		}
@@ -324,7 +290,7 @@ func main() {
 		log.Warn("ADMIN_EMAIL/ADMIN_PASSWORD not set: no admin account provisioned; login disabled")
 	}
 
-	s := &server{st: svc.Store, q: svc.Queue, log: log, secret: []byte(secret)}
+	s := &server{svc: service.New(boot.Store, boot.Queue, log), log: log, secret: []byte(secret)}
 
 	srv := &http.Server{Addr: ":" + envutil.Or("PORT", "8070"), Handler: s.routes()}
 	go func() {

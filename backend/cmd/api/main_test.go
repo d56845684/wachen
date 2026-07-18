@@ -10,6 +10,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/ikala/wachen/backend/internal/service"
 	"github.com/ikala/wachen/backend/internal/store"
 )
 
@@ -81,12 +82,12 @@ func (f *fakeEnqueuer) PublishReplyRequested(_ context.Context, id string) error
 
 var testLog = slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
-func newServer(st apiStore) *httptest.Server {
-	return httptest.NewServer((&server{st: st, q: &fakeEnqueuer{}, log: testLog, secret: []byte("test-secret")}).routes())
+func newServer(st service.Store) *httptest.Server {
+	return newServerWithQ(st, &fakeEnqueuer{})
 }
 
-func newServerWithQ(st apiStore, q enqueuer) *httptest.Server {
-	return httptest.NewServer((&server{st: st, q: q, log: testLog, secret: []byte("test-secret")}).routes())
+func newServerWithQ(st service.Store, q service.Enqueuer) *httptest.Server {
+	return httptest.NewServer((&server{svc: service.New(st, q, testLog), log: testLog, secret: []byte("test-secret")}).routes())
 }
 
 func adminUser() *store.AuthedUser {
