@@ -199,18 +199,18 @@ services:
       api:
         condition: service_started
 
-  adminer:
-    restart: unless-stopped
-    image: adminer:4
-    container_name: wachen-adminer
-    mem_limit: 128m
-    ports:
-      - "127.0.0.1:8080:8080"   # DB debug UI 只給本機，不對外
-    environment:
-      ADMINER_DEFAULT_SERVER: postgres
-    depends_on:
-      postgres:
-        condition: service_healthy
+  # adminer:
+  #   restart: unless-stopped
+  #   image: adminer:4
+  #   container_name: wachen-adminer
+  #   mem_limit: 128m
+  #   ports:
+  #     - "127.0.0.1:8080:8080"   # DB debug UI 只給本機，不對外
+  #   environment:
+  #     ADMINER_DEFAULT_SERVER: postgres
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
 
 volumes:
   pgdata:
