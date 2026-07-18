@@ -49,6 +49,7 @@ type ReplyRequest struct {
 type ReplyResult struct {
 	ExternalReplyID string
 	ReplyURL        string
+	Platform        json.RawMessage // 平台原始回應/通道註記（落 replies.platform_response）
 }
 
 type SourceAdapter interface {

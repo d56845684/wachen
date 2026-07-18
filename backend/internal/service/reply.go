@@ -49,7 +49,7 @@ func (s *Service) PendingApprovals(ctx context.Context) ([]store.PendingReply, e
 }
 
 // enqueueReply：回覆已寫入 DB（approved），入列失敗不擋使用者；
-// worker 另有 approved 掃描補送（M-later）
+// replier 的對帳迴圈會補送久未消費的 approved（StaleApprovedReplies）
 func (s *Service) enqueueReply(ctx context.Context, replyID string) {
 	if err := s.q.PublishReplyRequested(ctx, replyID); err != nil {
 		s.log.Error("enqueue reply failed", "reply_id", replyID, "err", err)

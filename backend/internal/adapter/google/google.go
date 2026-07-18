@@ -199,7 +199,10 @@ func (a *Adapter) Reply(ctx context.Context, rawCfg json.RawMessage, req adapter
 		if resp.StatusCode >= 300 {
 			return nil, fmt.Errorf("reply %s: status %d: %s", u, resp.StatusCode, data)
 		}
-		return &adapter.ReplyResult{ExternalReplyID: req.ExternalID + "/reply"}, nil
+		return &adapter.ReplyResult{
+			ExternalReplyID: req.ExternalID + "/reply",
+			Platform:        json.RawMessage(`{"channel":"gbp_v4"}`),
+		}, nil
 	}
 	return nil, fmt.Errorf("review %s not found in any configured location", req.ExternalID)
 }

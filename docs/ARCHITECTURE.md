@@ -253,6 +253,7 @@ stateDiagram-v2
     approved --> sending : Reply Worker 消費 reply.requested
     sending --> sent : 平台 API 成功，記錄 external_reply_id
     sending --> failed : 重試耗盡，通知處理人員
+    sending --> approved : 逾時回收（worker 崩潰於送出中，對帳退回重入列）
     failed --> approved : 人工重新觸發
 ```
 
@@ -260,7 +261,8 @@ stateDiagram-v2
 2. 核准後 API 發 `reply.requested`（帶 `idempotency_key`）。
 3. **Reply Worker**（部署在爬蟲層，與 Crawler Worker 共用各平台的 Adapter 憑證）以 type assertion 檢查該來源 Adapter 是否 `ReplyCapable`，呼叫平台 API 送出。
 4. 成功 → 回寫 `external_reply_id` / `reply_url`，發 `reply.result`；失敗 → 指數退避重試，耗盡進 `failed` 並通知處理人員。
-5. **冪等保證**：`replies.idempotency_key` 唯一鍵 + 送出前查詢平台是否已存在同 key 回覆（能查的平台），確保 MQ 重投遞不會重複發文。
+5. **冪等保證**：`replies.idempotency_key` 唯一鍵，隨送出請求帶到平台/callback 供對端去重；`ClaimReplyForSend`（approved→sending 搶占）確保 MQ 重投遞/補發同時只有一個消費者能送。
+6. **對帳兜底**（Reply Worker 每 60s，與爬蟲 reaper、Routing 對帳同哲學）：`sending` 逾時（worker 崩潰於 claim 後）退回 `approved` 並重新入列，累計嘗試耗盡轉 `failed`；`approved` 久未消費（API 入列失敗、publish 遺失）補發 `reply.requested`。事件會丟，資料庫狀態是真相。
 
 ### 6.2 各來源回覆能力
 

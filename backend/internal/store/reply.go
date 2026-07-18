@@ -46,14 +46,15 @@ type Reply struct {
 
 // replyTarget：送出一則回覆所需的來源上下文（Reply Worker 用）
 type ReplyTarget struct {
-	ReplyID      string
-	Content      string
-	Adapter      string
-	Config       json.RawMessage
-	ExternalID   string // 原評論在平台上的 ID
-	LocationID   string
-	CanReply     bool
-	MaxLen       int
+	ReplyID        string
+	Content        string
+	Adapter        string
+	Config         json.RawMessage
+	ExternalID     string // 原評論在平台上的 ID
+	LocationID     string
+	IdempotencyKey string // 帶給平台/callback 防重複發文
+	CanReply       bool
+	MaxLen         int
 }
 
 // caseReplyContext 查案件對應來源的回覆能力（建立回覆時 gate 用）
@@ -170,14 +171,14 @@ func (s *Store) ClaimReplyForSend(ctx context.Context, replyID string) (*ReplyTa
 		var caps []byte
 		var locID *string
 		err = tx.QueryRow(ctx, `
-			SELECT rp.id, rp.content, src.adapter, src.config,
+			SELECT rp.id, rp.content, rp.idempotency_key, src.adapter, src.config,
 			       v.external_id, st.google_location_id, coalesce(src.capabilities, '{}')
 			FROM replies rp
 			JOIN reviews v ON v.id = rp.review_id
 			JOIN sources src ON src.name = v.source_name AND src.deleted_at IS NULL
 			LEFT JOIN stores st ON st.id = v.store_id AND st.deleted_at IS NULL
 			WHERE rp.id = $1`, replyID).
-			Scan(&t.ReplyID, &t.Content, &t.Adapter, &t.Config, &t.ExternalID, &locID, &caps)
+			Scan(&t.ReplyID, &t.Content, &t.IdempotencyKey, &t.Adapter, &t.Config, &t.ExternalID, &locID, &caps)
 		if err != nil {
 			return err
 		}
@@ -222,6 +223,72 @@ func (s *Store) MarkReplyFailed(ctx context.Context, replyID, errMsg string, isF
 			WHERE id = $1`, replyID, status, errMsg)
 		return err
 	})
+}
+
+// ReclaimStuckReplies：sending 卡死回收——worker 在 claim（approved→sending）之後、
+// 寫回結果之前崩潰，MQ 重投遞會因狀態不符被 Ack 放過，該回覆從此無人認領。
+// 超過 stuckFor 未更新的 sending 退回 approved（累計嘗試達 maxAttempts 則 failed），
+// 回傳退回 approved 的 id 供 caller 重新入列。SKIP LOCKED：多 replica 對帳不互卡。
+func (s *Store) ReclaimStuckReplies(ctx context.Context, stuckFor time.Duration, maxAttempts, limit int) ([]string, error) {
+	var requeue []string
+	err := s.withTx(ctx, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `
+			UPDATE replies SET
+			    status = CASE WHEN retry_count >= $2 THEN 'failed' ELSE 'approved' END,
+			    retry_count = retry_count + 1,
+			    error = 'reclaimed: send interrupted (worker died mid-send)'
+			WHERE id IN (
+			    SELECT id FROM replies
+			    WHERE status = 'sending' AND deleted_at IS NULL
+			      AND updated_at < now() - $1::interval
+			    ORDER BY updated_at
+			    LIMIT $3
+			    FOR UPDATE SKIP LOCKED)
+			RETURNING id, status`, stuckFor.String(), maxAttempts, limit)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id, status string
+			if err := rows.Scan(&id, &status); err != nil {
+				return err
+			}
+			if status == "approved" {
+				requeue = append(requeue, id)
+			}
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	return requeue, nil
+}
+
+// StaleApprovedReplies：approved 久未被消費（API 入列失敗、publish 遺失、或剛被
+// 卡死回收）→ 重新入列。與在途訊息重複無妨：ClaimReplyForSend 是冪等閘門，
+// 同一則回覆只有一個消費者能搶到 approved→sending。
+func (s *Store) StaleApprovedReplies(ctx context.Context, olderThan time.Duration, limit int) ([]string, error) {
+	rows, err := s.Pool.Query(ctx, `
+		SELECT id FROM replies
+		WHERE status = 'approved' AND deleted_at IS NULL
+		  AND updated_at < now() - $1::interval
+		ORDER BY updated_at
+		LIMIT $2`, olderThan.String(), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
 }
 
 // PendingApprovals：待審回覆佇列（給審核頁）
