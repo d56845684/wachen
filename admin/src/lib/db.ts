@@ -57,6 +57,9 @@ export interface WaDB {
   improve: { rows: { item: string; before: string; after: string; delta: string; good?: boolean }[]; store_rank: { store: string; delta: number }[] };
   notifications: { id: string; type: string; channel: string; title: string; body: string; case_id: string | null; time: string; read: boolean; level: "critical" | "warning" | "serious" | "good" }[];
   insights: { anomalies: { t?: string; d?: string; title?: string; body?: string; sev?: string; level?: string }[]; rootcause: string; suggestions: string[]; qa: [string, string][] };
+  // 燦坤租戶版（generator 產出；ponytail: 單一外部租戶用扁平 key，第三個租戶再抽結構）
+  insights_tk?: WaDB["insights"];
+  improve_rows_tk?: WaDB["improve"]["rows"];
   rules: {
     dispatch: { cond: string; target: string; sla: string; notify: string; escalate: string; on: boolean }[];
     sla: { risk: string; first: string; resolve: string; remind: string; notify: string; calc: string }[];

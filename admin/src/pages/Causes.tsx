@@ -1,23 +1,27 @@
 /** 負評原因分析 — 對應 PAGES.causes */
-import { AGG, CAT_COLORS, cnt, DB, useApp, WEEKDAY } from "../lib/db";
-import { scopedCases } from "../lib/roles";
+import { CAT_COLORS, cnt, useApp, WEEKDAY } from "../lib/db";
+import { reviewFilters } from "../lib/filter";
+import { scopedCases, scopedStats } from "../lib/roles";
 import { BarChart, Donut, KwCloud } from "../components/charts";
 import { PageHeader, SectionT } from "../components/ui";
 import { FilterBar } from "../components/FilterBar";
 
 export default function Causes() {
   useApp();
-  const cs = scopedCases();
-  const cat = AGG.category.map((x, i) => ({ n: x[0], v: x[1], color: CAT_COLORS[i % 8] }));
-  const topBrands = DB.brands.slice(0, 4);
-  const catByBrand = AGG.category.slice(0, 6).map(([c]) => ({
+  const cs = reviewFilters(scopedCases());
+  const stats = scopedStats(cs);
+  const cat = stats.category.map((x, i) => ({ n: x[0], v: x[1], color: CAT_COLORS[i % 8] }));
+  const brandCnt = new Map<string, number>();
+  for (const c of cs) brandCnt.set(c.brand, (brandCnt.get(c.brand) ?? 0) + 1);
+  const topBrands = [...brandCnt.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([name]) => ({ name }));
+  const catByBrand = stats.category.slice(0, 6).map(([c]) => ({
     c,
     vals: topBrands.map((b) => cnt(cs, (x) => x.brand === b.name && x.categories.includes(c))),
   }));
   const hourRows = [];
   for (let h = 10; h <= 22; h++)
-    hourRows.push({ n: h + ":00", v: AGG.hour[h], color: AGG.hour[h] >= Math.max(...AGG.hour) * 0.7 ? "var(--critical)" : "var(--s1)" });
-  const wkRows = WEEKDAY.map((w, i) => ({ n: w, v: AGG.weekday[i], color: i >= 5 ? "var(--warning)" : "var(--s1)" }));
+    hourRows.push({ n: h + ":00", v: stats.hour[h], color: stats.hour[h] >= Math.max(...stats.hour, 1) * 0.7 ? "var(--critical)" : "var(--s1)" });
+  const wkRows = WEEKDAY.map((w, i) => ({ n: w, v: stats.weekday[i], color: i >= 5 ? "var(--warning)" : "var(--s1)" }));
 
   return (
     <>
@@ -30,7 +34,7 @@ export default function Causes() {
         <div className="card">
           <h3>問題類型占比</h3>
           <p className="cap">全部評論的問題標記</p>
-          <Donut rows={cat.slice(0, 7)} centerB={AGG.category.reduce((a, x) => a + x[1], 0)} centerS="標記數" />
+          <Donut rows={cat.slice(0, 7)} centerB={stats.category.reduce((a, x) => a + x[1], 0)} centerS="標記數" />
         </div>
         <div className="card">
           <h3>問題類型 × 時段（負評）</h3>
@@ -66,12 +70,12 @@ export default function Causes() {
         </div>
       </div>
       <SectionT>高頻負面關鍵字</SectionT>
-      <div className="card"><KwCloud list={AGG.kw_neg} tone="neg" /></div>
+      <div className="card"><KwCloud list={stats.kwNeg} tone="neg" /></div>
       <SectionT>AI 歸類說明</SectionT>
       <div className="card">
         <p style={{ margin: 0, color: "var(--ink-2)" }}>
           AI 會將語意相近的不同說法合併為同一問題類型，例如「等好久」「上菜很慢」「餐點一直沒來」統一歸為 <b>出餐速度</b>；
-          「態度差」「不理人」「臉很臭」歸為 <b>服務態度</b>。目前共歸納出 {AGG.category.length} 個問題類型。
+          「態度差」「不理人」「臉很臭」歸為 <b>服務態度</b>。目前共歸納出 {stats.category.length} 個問題類型。
         </p>
       </div>
     </>

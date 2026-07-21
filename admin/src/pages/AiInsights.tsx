@@ -2,12 +2,13 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { DB, useApp } from "../lib/db";
+import { getRole } from "../lib/roles";
 import { AlertRow, PageHeader, SectionT } from "../components/ui";
 
 export default function AiInsights() {
   useApp();
   const nav = useNavigate();
-  const I = DB.insights;
+  const I = (getRole().brand ? DB.insights_tk : null) ?? DB.insights;
   const [q, setQ] = useState("");
   const [answers, setAnswers] = useState<[string, string][]>(I.qa);
 

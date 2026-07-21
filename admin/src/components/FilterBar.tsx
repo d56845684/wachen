@@ -1,10 +1,11 @@
 /** 篩選列 — 對應 HTML 的 filterBar()；直接讀寫全域 rf，改動即 bump() 重繪 */
-import { AGG, bump, CASE_STATUS, clearFilters, DB, rf, RISK_LABEL, SENT_LABEL } from "../lib/db";
-import { scopedCases } from "../lib/roles";
+import { bump, CASE_STATUS, clearFilters, rf, RISK_LABEL, SENT_LABEL } from "../lib/db";
+import { scopedCases, scopedStats } from "../lib/roles";
 
 export function FilterBar({ full }: { full?: boolean }) {
-  const brands = DB.brands.map((b) => b.name);
-  const stores = [...new Set(scopedCases().map((c) => c.store))].sort();
+  const cs = scopedCases();
+  const brands = [...new Set(cs.map((c) => c.brand))].sort();
+  const stores = [...new Set(cs.map((c) => c.store))].sort();
   const set = (k: keyof typeof rf, v: string) => {
     (rf as unknown as Record<string, string>)[k] = v;
     bump();
@@ -43,7 +44,7 @@ export function FilterBar({ full }: { full?: boolean }) {
       ) : null}
       <select value={rf.cat} onChange={(e) => set("cat", e.target.value)}>
         <option value="">全部問題</option>
-        {AGG.category.map(([c]) => <option key={c} value={c}>{c}</option>)}
+        {scopedStats().category.map(([c]) => <option key={c} value={c}>{c}</option>)}
       </select>
       {full ? (
         <select value={rf.overdue} onChange={(e) => set("overdue", e.target.value)}>

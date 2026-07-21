@@ -1,6 +1,6 @@
 /** SLA 監控中心 — 對應 PAGES.sla */
-import { CASE_STATUS, DB, isActive, KPI, openCase, useApp, useNow } from "../lib/db";
-import { scopedCases } from "../lib/roles";
+import { CASE_STATUS, isActive, KPI, openCase, useApp, useNow } from "../lib/db";
+import { scopedCases, scopedStores } from "../lib/roles";
 import { BarChart } from "../components/charts";
 import { Kpi, PageHeader, RiskBadge, SectionT, SynthBar } from "../components/ui";
 
@@ -15,7 +15,16 @@ export default function SlaMonitor() {
     return d >= 0 && d < 3.6e6;
   });
   const rate = KPI.sla_rate;
-  const byBrand = [...DB.brands].sort((a, b) => a.sla_rate - b.sla_rate);
+  // 品牌 SLA 由 scoped 門市平均現算（示意值來自門市 sla_rate），兩個租戶同一條路
+  const brandSla = new Map<string, { sum: number; n: number }>();
+  for (const s of scopedStores()) {
+    const e = brandSla.get(s.brand) ?? { sum: 0, n: 0 };
+    e.sum += s.sla_rate; e.n++;
+    brandSla.set(s.brand, e);
+  }
+  const byBrand = [...brandSla.entries()]
+    .map(([name, v]) => ({ name, sla_rate: Math.round(v.sum / v.n) }))
+    .sort((a, b) => a.sla_rate - b.sla_rate);
 
   return (
     <>

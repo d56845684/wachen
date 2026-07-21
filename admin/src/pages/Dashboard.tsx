@@ -9,7 +9,6 @@ import {
 import { scopedCases, scopedStores } from "../lib/roles";
 import { BarChart, Donut, LineChart } from "../components/charts";
 import { AlertRow, Kpi, PageHeader, RiskBadge, SectionT, SynthBar } from "../components/ui";
-import { FilterBar } from "../components/FilterBar";
 
 export default function Dashboard() {
   useApp();
@@ -40,7 +39,6 @@ export default function Dashboard() {
         title="總部管理儀表板"
         sub="即時掌握全台門市評分、負評、客訴與 SLA — 快速定位需要介入的品牌、區域與門市"
       />
-      <FilterBar />
       <div className="kpis">
         <Kpi v={avg} l="集團平均評分" delta={0.3} s="較改善前 4.1" synth />
         <Kpi v={KPI.new_reviews} l="新增評論（近30天）" s={`累計 ${cs.length} 則`} />

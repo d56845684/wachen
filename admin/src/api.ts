@@ -1,17 +1,21 @@
 // API 客戶端：JWT 存 localStorage；401 一律導回登入
 const TOKEN_KEY = "wachen_token";
 const NAME_KEY = "wachen_name";
+const BROLE_KEY = "wachen_backend_role";
 
 export const auth = {
   token: () => localStorage.getItem(TOKEN_KEY),
   name: () => localStorage.getItem(NAME_KEY) ?? "",
-  save: (token: string, name: string) => {
+  backendRole: () => localStorage.getItem(BROLE_KEY) ?? "",
+  save: (token: string, name: string, role: string) => {
     localStorage.setItem(TOKEN_KEY, token);
     localStorage.setItem(NAME_KEY, name);
+    localStorage.setItem(BROLE_KEY, role);
   },
   clear: () => {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(NAME_KEY);
+    localStorage.removeItem(BROLE_KEY);
   },
 };
 
@@ -150,7 +154,7 @@ export interface PipelineStats {
 
 export const api = {
   login: (email: string, password: string) =>
-    request<{ token: string; name: string }>("/login", {
+    request<{ token: string; name: string; role: string }>("/login", {
       method: "POST",
       body: JSON.stringify({ email, password }),
     }),

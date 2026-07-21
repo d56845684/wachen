@@ -87,7 +87,7 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.log.Info("login ok", "user", u.Email)
-	writeJSON(w, http.StatusOK, map[string]string{"token": token, "name": u.DisplayName})
+	writeJSON(w, http.StatusOK, map[string]string{"token": token, "name": u.DisplayName, "role": u.Role})
 }
 
 // auth：驗 Bearer token，把使用者 email 放進 context（稽核 actor 用）
@@ -288,6 +288,15 @@ func main() {
 		log.Info("admin provisioned from env", "email", email)
 	} else {
 		log.Warn("ADMIN_EMAIL/ADMIN_PASSWORD not set: no admin account provisioned; login disabled")
+	}
+
+	// 燦坤租戶帳號（選配）：登入即鎖定燦坤資料範圍
+	if email, pw := os.Getenv("TSANNKUEN_EMAIL"), os.Getenv("TSANNKUEN_PASSWORD"); email != "" && pw != "" {
+		if err := boot.Store.EnsureUser(ctx, email, pw, "tsannkuen", "燦X3C 管理者"); err != nil {
+			log.Error("provision tsannkuen failed", "err", err)
+			os.Exit(1)
+		}
+		log.Info("tsannkuen provisioned from env", "email", email)
 	}
 
 	s := &server{svc: service.New(boot.Store, boot.Queue, log), log: log, secret: []byte(secret)}

@@ -1,11 +1,16 @@
 /** 改善成效分析 — 對應 PAGES.improve */
 import { DB, useApp } from "../lib/db";
+import { getRole, scopedStores } from "../lib/roles";
 import { BarChart } from "../components/charts";
 import { PageHeader, SectionT, SynthBar } from "../components/ui";
 
 export default function Improve() {
   useApp();
-  const R = DB.improve;
+  const rows = (getRole().brand ? DB.improve_rows_tk : null) ?? DB.improve.rows;
+  // 門市排名改由 scoped 門市的 trend 現算 —— 兩個租戶同一條路
+  const storeRank = [...scopedStores()]
+    .sort((a, b) => b.trend - a.trend).slice(0, 8)
+    .map((s) => ({ store: s.store, delta: s.trend }));
   return (
     <>
       <PageHeader title="改善成效分析" sub="驗證處理客訴後，是否真的改善顧客體驗" />
@@ -19,7 +24,7 @@ export default function Improve() {
             <tr><th>改善項目</th><th className="num">改善前</th><th className="num">改善後</th><th className="num">變化</th></tr>
           </thead>
           <tbody>
-            {R.rows.map((r) => (
+            {rows.map((r) => (
               <tr key={r.item} style={{ cursor: "default" }}>
                 <td style={{ fontWeight: 600 }}>{r.item}</td>
                 <td className="num">{r.before}</td>
@@ -44,7 +49,7 @@ export default function Improve() {
           <h3>門市改善幅度排名</h3>
           <p className="cap">評分改善幅度（示意）</p>
           <BarChart
-            rows={R.store_rank.map((s) => ({
+            rows={storeRank.map((s) => ({
               n: s.store.length > 10 ? s.store.slice(0, 10) : s.store,
               v: s.delta,
               color: s.delta >= 0 ? "var(--good)" : "var(--critical)",

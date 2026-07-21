@@ -179,6 +179,8 @@ services:
       JWT_SECRET: ${JWT_SECRET:-dev_jwt_secret_change_me}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      TSANNKUEN_EMAIL: ${TSANNKUEN_EMAIL:-}
+      TSANNKUEN_PASSWORD: ${TSANNKUEN_PASSWORD:-}
       PORT: "8070"
     # 不對外：唯一入口是 web(nginx) 的 /api/ 反向代理
     depends_on:

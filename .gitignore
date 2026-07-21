@@ -23,6 +23,11 @@ backups/
 scripts/.wacheng_stores.json
 scripts/wacheng_stores.generated.sql
 scripts/.debug_maps*.png
+scripts/sync-gpu.sh
+scripts/sync-gpu-db.sh
+scripts/.tsann*
+scripts/scrape_*.py
+scripts/gen_tsannkuen_db.mjs
 admin/package-lock.json
 .claude
 deploy/aws/.terraform/

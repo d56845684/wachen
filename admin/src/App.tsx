@@ -1,12 +1,12 @@
 /** App shell — 側欄 + 頂欄 + 角色切換 + 案件/門市 drawer（瓦城顧客體驗中台 設計） */
-import { ReactNode, useState } from "react";
+import { ReactNode, useEffect, useState } from "react";
 import {
   BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate,
 } from "react-router-dom";
 import { auth } from "./api";
 import { cnt, useApp } from "./lib/db";
 import {
-  allowedMenu, getRole, getRoleId, MENU, ROLES, scopedCases, scopedNotifications, setRole, TITLES, type RoleId,
+  allowedMenu, allowedRoleIds, getRole, getRoleId, loginRoleId, MENU, ROLES, scopedCases, scopedNotifications, setRole, TITLES, type RoleId,
 } from "./lib/roles";
 import { DrawerHost } from "./components/Drawer";
 import Login from "./pages/Login";
@@ -38,7 +38,12 @@ function Shell({ children }: { children: ReactNode }) {
   const [sbOpen, setSbOpen] = useState(false);
   if (!auth.token()) return <Navigate to="/login" replace />;
 
-  const role = getRole();
+  // 租戶隔離：目前角色一律夾在登入帳號可切的角色內（防跨租戶殘留）
+  const allowedRoles = allowedRoleIds();
+  const curRole: RoleId = allowedRoles.includes(getRoleId()) ? getRoleId() : loginRoleId();
+  useEffect(() => { if (getRoleId() !== curRole) setRole(curRole); }, [curRole]);
+
+  const role = ROLES[curRole];
   const view = loc.pathname.split("/")[1] || "dashboard";
 
   // 角色看不到的頁 → 導回角色首頁（store 角色的 dashboard 對應 /store）
@@ -56,8 +61,8 @@ function Shell({ children }: { children: ReactNode }) {
     <>
       <nav className={`sidebar ${sbOpen ? "open" : ""}`}>
         <div className="sb-brand">
-          <span className="m">瓦</span>
-          <div>顧客體驗中台<small>Wacity CX Hub</small></div>
+          <span className="m">客</span>
+          <div>顧客體驗中台<small>CX Hub</small></div>
         </div>
         {MENU.map((grp) => {
           const items = grp.items.filter((it) => allowedMenu(it.id));
@@ -92,9 +97,13 @@ function Shell({ children }: { children: ReactNode }) {
           <span className="spacer" />
           <label className="role-sel">
             角色
-            <select value={getRoleId()} onChange={(e) => { setRole(e.target.value as RoleId); nav(ROLES[e.target.value as RoleId].home); }}>
-              {Object.entries(ROLES).map(([k, r]) => <option key={k} value={k}>{r.title}</option>)}
-            </select>
+            {allowedRoles.length > 1 ? (
+              <select value={curRole} onChange={(e) => { setRole(e.target.value as RoleId); nav(ROLES[e.target.value as RoleId].home); }}>
+                {allowedRoles.map((k) => <option key={k} value={k}>{ROLES[k].title}</option>)}
+              </select>
+            ) : (
+              <span style={{ marginLeft: 6, fontWeight: 600 }}>{ROLES[curRole].title}</span>
+            )}
           </label>
           <button className="bell" aria-label="通知" onClick={() => nav("/notifications")}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

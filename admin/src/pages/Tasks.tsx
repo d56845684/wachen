@@ -1,12 +1,14 @@
 /** 改善任務管理 — 對應 PAGES.tasks */
 import { cnt, DB, useApp } from "../lib/db";
+import { scopedCases } from "../lib/roles";
 import { Kpi, PageHeader, pocAlert, RiskBadge } from "../components/ui";
 
 const STATUSES = ["待開始", "進行中", "待驗證", "已完成", "延遲"];
 
 export default function Tasks() {
   useApp();
-  const T = DB.tasks;
+  const brands = new Set(scopedCases().map((c) => c.brand_short));
+  const T = DB.tasks.filter((t) => brands.has(t.brand));
   return (
     <>
       <PageHeader

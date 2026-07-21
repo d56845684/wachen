@@ -1,20 +1,30 @@
 /** 顧客聲量與情緒分析 — 對應 PAGES.voice */
-import { AGG, cnt, DB, pct, SENT_COLOR, SENT_LABEL, sum, useApp } from "../lib/db";
-import { scopedCases } from "../lib/roles";
+import { cnt, pct, SENT_COLOR, SENT_LABEL, sum, useApp } from "../lib/db";
+import { reviewFilters } from "../lib/filter";
+import { scopedCases, scopedStats } from "../lib/roles";
 import { BarChart, Donut, KwCloud, LineChart } from "../components/charts";
 import { Kpi, PageHeader } from "../components/ui";
 import { FilterBar } from "../components/FilterBar";
 
 export default function Voice() {
   useApp();
-  const cs = scopedCases();
-  const months = AGG.monthly.map((m) => m.month.slice(2));
+  const cs = reviewFilters(scopedCases());
+  const stats = scopedStats(cs);
+  const months = stats.monthly.map((m) => m.month.slice(2));
   const starRows = [5, 4, 3, 2, 1].map((n) => ({
     n: "★".repeat(n),
-    v: AGG.star[String(n)] ?? 0,
+    v: stats.star[String(n)] ?? 0,
     color: ["var(--seq5)", "var(--seq4)", "var(--seq3)", "var(--seq2)", "var(--seq1)"][5 - n],
   }));
-  const brandVoice = DB.brands.map((b) => ({ n: b.name.length > 6 ? b.name.slice(0, 6) : b.name, v: b.avg_rating, color: "var(--s2)" }));
+  const byBrand = new Map<string, { sum: number; n: number }>();
+  for (const c of cs) {
+    const e = byBrand.get(c.brand) ?? { sum: 0, n: 0 };
+    e.sum += c.rating || 0; e.n++;
+    byBrand.set(c.brand, e);
+  }
+  const brandVoice = [...byBrand.entries()].map(([b, v]) => ({
+    n: b.length > 6 ? b.slice(0, 6) : b, v: Math.round((v.sum / v.n) * 10) / 10, color: "var(--s2)",
+  }));
   const sentRows = (["positive", "neutral", "negative"] as const).map((k) => ({
     n: SENT_LABEL[k], v: cnt(cs, (c) => c.sentiment === k), color: SENT_COLOR[k],
   }));
@@ -39,8 +49,8 @@ export default function Voice() {
           <LineChart
             labels={months}
             series={[
-              { label: "評論量", color: "var(--s1)", data: AGG.monthly.map((m) => m.reviews) },
-              { label: "負評量", color: "var(--critical)", data: AGG.monthly.map((m) => m.neg) },
+              { label: "評論量", color: "var(--s1)", data: stats.monthly.map((m) => m.reviews) },
+              { label: "負評量", color: "var(--critical)", data: stats.monthly.map((m) => m.neg) },
             ]}
           />
         </div>
@@ -57,8 +67,8 @@ export default function Voice() {
         </div>
       </div>
       <div className="grid g2">
-        <div className="card"><h3>熱門正面關鍵字</h3><p className="cap">顧客稱讚什麼</p><KwCloud list={AGG.kw_pos} tone="pos" /></div>
-        <div className="card"><h3>熱門負面關鍵字</h3><p className="cap">顧客抱怨什麼</p><KwCloud list={AGG.kw_neg} tone="neg" /></div>
+        <div className="card"><h3>熱門正面關鍵字</h3><p className="cap">顧客稱讚什麼</p><KwCloud list={stats.kwPos} tone="pos" /></div>
+        <div className="card"><h3>熱門負面關鍵字</h3><p className="cap">顧客抱怨什麼</p><KwCloud list={stats.kwNeg} tone="neg" /></div>
       </div>
     </>
   );
