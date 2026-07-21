@@ -5,7 +5,7 @@ import {
 import { reviewFilters } from "../lib/filter";
 import { scopedCases } from "../lib/roles";
 import { FilterBar } from "../components/FilterBar";
-import { PageHeader, pocAlert, RiskBadge, Sla, Stars } from "../components/ui";
+import { PageHeader, pocAlert, RiskBadge, Stars } from "../components/ui";
 
 export default function Reviews() {
   useApp();
@@ -31,7 +31,7 @@ export default function Reviews() {
           <thead>
             <tr>
               <th>評論時間</th><th>品牌/門市</th><th>平台</th><th className="num">星等</th><th>評論摘要</th>
-              <th>AI 情緒</th><th>AI 分類</th><th>風險</th><th>案件狀態</th><th>負責人</th><th>SLA 倒數</th>
+              <th>AI 情緒</th><th>AI 分類</th><th>風險</th><th>案件狀態</th><th>負責人</th>
             </tr>
           </thead>
           <tbody>
@@ -49,7 +49,6 @@ export default function Reviews() {
                 <td><RiskBadge level={c.risk_level} label={RISK_LABEL[c.risk_level]} /></td>
                 <td><span className={`pill st-${c.cstatus}`}>{CASE_STATUS[c.cstatus]}</span></td>
                 <td style={{ maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis" }}>{c.assignee}</td>
-                <td><Sla c={c} /></td>
               </tr>
             ))}
           </tbody>

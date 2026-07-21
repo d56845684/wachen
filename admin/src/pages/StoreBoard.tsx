@@ -4,7 +4,7 @@ import {
   CASES, CASE_STATUS, cnt, DB, fmtD, fmtDT, isActive, META, openCase, useApp,
 } from "../lib/db";
 import { getRole } from "../lib/roles";
-import { AlertRow, Kpi, PageHeader, RiskBadge, SectionT, Sla, Stars, SynthBar } from "../components/ui";
+import { AlertRow, Kpi, PageHeader, RiskBadge, SectionT, Stars, SynthBar } from "../components/ui";
 import { pocAlert } from "../components/ui";
 
 export default function StoreBoard() {
@@ -71,7 +71,7 @@ export default function StoreBoard() {
           <thead>
             <tr>
               <th>評論時間</th><th>平台</th><th className="num">星等</th><th>顧客評論</th>
-              <th>AI 分類</th><th>風險</th><th>狀態</th><th>負責人</th><th>SLA</th>
+              <th>AI 分類</th><th>風險</th><th>狀態</th><th>負責人</th>
             </tr>
           </thead>
           <tbody>
@@ -85,7 +85,6 @@ export default function StoreBoard() {
                 <td><RiskBadge level={c.risk_level} /></td>
                 <td><span className={`pill st-${c.cstatus}`}>{CASE_STATUS[c.cstatus]}</span></td>
                 <td>{c.assignee.replace("店經理 · ", "")}</td>
-                <td><Sla c={c} /></td>
               </tr>
             ))}
           </tbody>

@@ -1,8 +1,8 @@
 /** 共用 UI 元件 — 對應 HTML 的 kpiCard / badge / pill / stars / slaCell / alertRow */
 import { ReactNode } from "react";
 import {
-  CASE_STATUS, RISK_LABEL, isActive, useNow,
-  type CaseStatus, type RiskLevel, type WaCase,
+  CASE_STATUS, RISK_LABEL,
+  type CaseStatus, type RiskLevel,
 } from "../lib/db";
 
 export function Kpi(props: {
@@ -42,26 +42,6 @@ export function Stars({ n }: { n: number }) {
     <span className="stars">
       {"★".repeat(full)}
       <span className="off">{"★".repeat(5 - full)}</span>
-    </span>
-  );
-}
-
-/** SLA 倒數 — 共用秒針，逾期紅 / 一小時內黃 */
-export function Sla({ c }: { c: WaCase }) {
-  const now = useNow();
-  if (!isActive(c)) return <span className="sla done">已結束</span>;
-  const due = Date.parse(c.sla_due_at);
-  if (Number.isNaN(due)) return <span className="sla done">—</span>;
-  const diff = due - now;
-  const over = diff < 0;
-  const a = Math.abs(diff);
-  const h = Math.floor(a / 3.6e6);
-  const m = Math.floor((a % 3.6e6) / 6e4);
-  const s = Math.floor((a % 6e4) / 1e3);
-  const p = (x: number) => String(x).padStart(2, "0");
-  return (
-    <span className={`sla ${over ? "due" : diff < 3.6e6 ? "warn" : ""}`}>
-      {(over ? "逾期 " : "") + `${h}:${p(m)}:${p(s)}`}
     </span>
   );
 }

@@ -9,7 +9,7 @@ import {
 } from "../lib/db";
 import { getRole, mask } from "../lib/roles";
 import { BarChart } from "./charts";
-import { Kpi, pocAlert, RiskBadge, Sla, Stars, StatusPill } from "./ui";
+import { Kpi, pocAlert, RiskBadge, Stars, StatusPill } from "./ui";
 
 export function DrawerHost() {
   useApp();
@@ -64,7 +64,6 @@ function CaseDrawer({ id }: { id: string }) {
         <button className="btn sm" onClick={closeDrawer}>← 返回</button>
         <RiskBadge level={c.risk_level} />
         <StatusPill status={c.cstatus} />
-        <Sla c={c} />
         {c.escalated ? <RiskBadge level="high" label="已升級" /> : null}
         <span style={{ marginLeft: "auto", fontVariantNumeric: "tabular-nums", color: "var(--muted)", fontSize: 12 }}>{c.code}</span>
       </div>

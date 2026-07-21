@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, CaseFilters, CaseSummary, Facet } from "../api";
-import { RiskSeal, SLACountdown, Stars, StatusPill } from "../components";
+import { RiskSeal, Stars, StatusPill } from "../components";
 
 const RISKS = [
   ["", "全部風險"],
@@ -188,10 +188,6 @@ export default function Inbox() {
               </div>
               <div className="case-side">
                 <StatusPill status={c.status} />
-                <SLACountdown
-                  dueAt={c.sla_due_at}
-                  active={c.status === "open" || c.status === "in_progress"}
-                />
               </div>
             </article>
           ))}

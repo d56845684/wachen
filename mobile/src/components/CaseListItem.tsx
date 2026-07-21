@@ -7,7 +7,6 @@ import { Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { PressableScale } from './PressableScale';
 import { RiskBadge, StatusPill } from './Badge';
-import { SlaCountdown } from './SlaCountdown';
 import { radius, space } from '@/theme/tokens';
 import { useTheme } from '@/theme/useTheme';
 import type { Case } from '@/types/domain';
@@ -29,8 +28,6 @@ export function CaseListItem({ item }: { item: Case }) {
           {'★'.repeat(item.rating)}<Text style={{ color: t.grid }}>{'★'.repeat(5 - item.rating)}</Text>
         </Text>
         <Text style={{ color: t.muted, fontSize: 11 }}>{item.platform} · {item.posted_at.slice(0, 10)}</Text>
-        <View style={{ flex: 1 }} />
-        <SlaCountdown item={item} />
       </View>
       <Text numberOfLines={2} style={{ color: t.ink, fontSize: 14, lineHeight: 20, fontWeight: '600' }}>
         {item.summary}

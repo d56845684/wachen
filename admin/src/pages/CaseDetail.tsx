@@ -1,7 +1,7 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, CaseDetail as Detail } from "../api";
-import { RiskSeal, SLACountdown, Stars, StatusPill, statusLabel } from "../components";
+import { RiskSeal, Stars, StatusPill, statusLabel } from "../components";
 
 const REPLY_STATUS: Record<string, string> = {
   draft: "草稿",
@@ -76,10 +76,6 @@ export default function CaseDetailPage() {
           <div className="case-meta">
             <span>{d.source_name}</span>
             <StatusPill status={d.status} />
-            <SLACountdown
-              dueAt={d.sla_due_at}
-              active={d.status === "open" || d.status === "in_progress"}
-            />
             {d.reopened_count > 0 && <span className="tag reopen">回開 ×{d.reopened_count}</span>}
           </div>
         </div>

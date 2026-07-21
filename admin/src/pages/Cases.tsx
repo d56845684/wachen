@@ -5,7 +5,7 @@ import {
 import { reviewFilters } from "../lib/filter";
 import { scopedCases } from "../lib/roles";
 import { FilterBar } from "../components/FilterBar";
-import { PageHeader, pocAlert, RiskBadge, Sla } from "../components/ui";
+import { PageHeader, pocAlert, RiskBadge } from "../components/ui";
 
 const TALLY: CaseStatus[] = ["unassigned", "open", "in_progress", "pending_review", "pending_customer", "done", "closed"];
 
@@ -40,7 +40,7 @@ export default function Cases() {
           <thead>
             <tr>
               <th>案件編號</th><th>建立時間</th><th>品牌/門市</th><th>問題類型</th><th>風險</th>
-              <th>顧客摘要</th><th>負責人</th><th>狀態</th><th>SLA 剩餘</th><th>升級</th>
+              <th>顧客摘要</th><th>負責人</th><th>狀態</th><th>升級</th>
             </tr>
           </thead>
           <tbody>
@@ -56,7 +56,6 @@ export default function Cases() {
                 <td className="wrap">{c.summary.slice(0, 44)}</td>
                 <td style={{ maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis" }}>{c.assignee}</td>
                 <td><span className={`pill st-${c.cstatus}`}>{CASE_STATUS[c.cstatus]}</span></td>
-                <td><Sla c={c} /></td>
                 <td>{c.escalated ? <RiskBadge level="high" label="已升級" /> : null}</td>
               </tr>
             ))}

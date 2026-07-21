@@ -1,5 +1,3 @@
-import { useEffect, useState } from "react";
-
 const RISK_CHAR: Record<string, string> = { high: "高", medium: "中", low: "低" };
 
 export function RiskSeal({ risk, small }: { risk: string; small?: boolean }) {
@@ -19,33 +17,6 @@ export function StatusPill({ status }: { status: string }) {
 
 export function statusLabel(s: string) {
   return STATUS_LABEL[s] ?? s;
-}
-
-/** SLA 倒數：mono 字體活時鐘，逾期轉紅閃爍（開放中案件才有意義） */
-export function SLACountdown({ dueAt, active }: { dueAt: string; active: boolean }) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!active) return;
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, [active]);
-
-  if (!active) return <span className="sla">SLA —</span>;
-
-  const ms = new Date(dueAt).getTime() - now;
-  const overdue = ms < 0;
-  const abs = Math.abs(ms);
-  const h = Math.floor(abs / 3_600_000);
-  const m = Math.floor((abs % 3_600_000) / 60_000);
-  const s = Math.floor((abs % 60_000) / 1000);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  const text = `${h}:${pad(m)}:${pad(s)}`;
-
-  return (
-    <span className={`sla${overdue ? " due" : ""}`}>
-      {overdue ? `逾期 ${text}` : `SLA ${text}`}
-    </span>
-  );
 }
 
 export function Stars({ rating }: { rating: number | null }) {

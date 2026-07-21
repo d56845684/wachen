@@ -2,7 +2,7 @@
 import { CASE_STATUS, DB, isActive, KPI, openCase, useApp, useNow } from "../lib/db";
 import { scopedCases } from "../lib/roles";
 import { BarChart } from "../components/charts";
-import { Kpi, PageHeader, RiskBadge, SectionT, Sla, SynthBar } from "../components/ui";
+import { Kpi, PageHeader, RiskBadge, SectionT, SynthBar } from "../components/ui";
 
 export default function SlaMonitor() {
   useApp();
@@ -61,7 +61,7 @@ export default function SlaMonitor() {
       <div className="tbl-wrap">
         <table>
           <thead>
-            <tr><th>案件</th><th>門市</th><th>風險</th><th>負責人</th><th>狀態</th><th>SLA</th><th>顯示狀態</th></tr>
+            <tr><th>案件</th><th>門市</th><th>風險</th><th>負責人</th><th>狀態</th><th>顯示狀態</th></tr>
           </thead>
           <tbody>
             {[...overdue, ...soon].slice(0, 60).map((c) => {
@@ -73,7 +73,6 @@ export default function SlaMonitor() {
                   <td><RiskBadge level={c.risk_level} /></td>
                   <td>{c.assignee}</td>
                   <td><span className={`pill st-${c.cstatus}`}>{CASE_STATUS[c.cstatus]}</span></td>
-                  <td><Sla c={c} /></td>
                   <td><RiskBadge level={d < 0 ? "high" : "medium"} label={c.escalated ? "已升級" : d < 0 ? "已逾期" : "即將逾期"} /></td>
                 </tr>
               );
