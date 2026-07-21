@@ -108,6 +108,16 @@ export function scopedCases(): WaCase[] {
   if (r.riskOnly) cs = cs.filter((c) => c.risk_level === "high");
   return cs;
 }
+/** 通知裁切：有案件裁切的角色（store/region/pr）只看得到自己案件範圍內的通知。
+ *  ponytail: 通知資料沒有 recipient/store 欄位，跨門市彙總類（case_id 空）對裁切角色一律隱藏；
+ *  要做到「區經理看得到區域彙總」需後端補 recipient 欄位。 */
+export function scopedNotifications() {
+  const cs = scopedCases();
+  if (cs === CASES) return DB.notifications; // 未裁切角色（hq/cs）看全部
+  const ids = new Set(cs.map((c) => c.id));
+  return DB.notifications.filter((n) => n.case_id && ids.has(n.case_id));
+}
+
 export function scopedStores(): WaStore[] {
   const r = getRole();
   if (r.store) return DB.stores.filter((s) => s.store === r.store);

@@ -1,18 +1,20 @@
 /** 通知中心 — 對應 PAGES.notifications */
-import { DB, fmtDT, markAllRead, markRead, openCase, useApp } from "../lib/db";
+import { fmtDT, markAllRead, markRead, openCase, useApp } from "../lib/db";
+import { scopedNotifications } from "../lib/roles";
 import { AlertRow, PageHeader, RiskBadge } from "../components/ui";
 
 export default function NotificationsPage() {
   useApp();
+  const ns = scopedNotifications();
   return (
     <>
       <PageHeader
         title="通知中心"
         sub="集中查看系統所有提醒 · 管道：站內 / Email / LINE / App Push"
-        right={<button className="btn" onClick={markAllRead}>全部標為已讀</button>}
+        right={<button className="btn" onClick={() => markAllRead(ns.map((n) => n.id))}>全部標為已讀</button>}
       />
       <div className="alist">
-        {DB.notifications.map((n) => (
+        {ns.map((n) => (
           <AlertRow
             key={n.id}
             level={n.level}
@@ -33,6 +35,7 @@ export default function NotificationsPage() {
             }
           />
         ))}
+        {ns.length === 0 && <div className="note">目前沒有你範圍內的通知</div>}
       </div>
     </>
   );

@@ -192,8 +192,9 @@ export function markRead(nid: string) {
   if (n) n.read = true;
   bump();
 }
-export function markAllRead() {
-  DB.notifications.forEach((n) => { n.read = true; });
+export function markAllRead(ids?: string[]) {
+  const set = ids && new Set(ids);
+  DB.notifications.forEach((n) => { if (!set || set.has(n.id)) n.read = true; });
   bump();
 }
 

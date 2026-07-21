@@ -4,9 +4,9 @@ import {
   BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate,
 } from "react-router-dom";
 import { auth } from "./api";
-import { cnt, DB, useApp } from "./lib/db";
+import { cnt, useApp } from "./lib/db";
 import {
-  allowedMenu, getRole, getRoleId, MENU, ROLES, scopedCases, setRole, TITLES, type RoleId,
+  allowedMenu, getRole, getRoleId, MENU, ROLES, scopedCases, scopedNotifications, setRole, TITLES, type RoleId,
 } from "./lib/roles";
 import { DrawerHost } from "./components/Drawer";
 import Login from "./pages/Login";
@@ -49,7 +49,7 @@ function Shell({ children }: { children: ReactNode }) {
 
   const sc = scopedCases();
   const openCnt = cnt(sc, (c) => ["unassigned", "open"].includes(c.cstatus));
-  const alerts = DB.notifications.filter((n) => !n.read).length;
+  const alerts = scopedNotifications().filter((n) => !n.read).length;
   const scopeLabel = role.store ? "門市：" + role.store : role.scope ?? "—";
 
   return (
